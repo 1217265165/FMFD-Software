@@ -298,12 +298,9 @@ FMFD::FMFD(QWidget* parent)
     m_dataAcquisitionService = std::make_unique<DataAcquisitionService>();
 
     // 初始化BRB路径（默认值，可通过配置对话框修改）
-    // 注意：开发环境默认路径，生产环境应通过配置对话框设置实际路径
     // 从配置文件加载保存的路径，如果没有则使用默认值
     QSettings settings("FMFD", "FMFD-Software");
-    m_brbPythonPath = settings.value("BRB/PythonPath", "python").toString();
-    m_brbScriptPath = settings.value("BRB/ScriptPath", "D:/PycharmProjects/FMFD/FMFD/brb_diagnosis_cli.py").toString();
-    m_brbExePath = settings.value("BRB/ExePath", QCoreApplication::applicationDirPath() + "/x64/Release/BRB/brb_diagnosis.exe").toString();
+    m_brbExePath = settings.value("BRB/ExePath", QCoreApplication::applicationDirPath() + "/BRB/brb_diagnosis.exe").toString();
 
     // 初始化配置
     m_currentConfig.mode = FrequencySweepConfig::Mode::SegmentGeneration;
@@ -370,7 +367,7 @@ void FMFD::setupUi()
     actionMenu->addSeparator();
 
     // ============ BRB诊断 ============
-    QAction* brbDiagnosisAction = new QAction(tr("运行BRB诊断 (Python)"), this);
+    QAction* brbDiagnosisAction = new QAction(tr("运行BRB诊断"), this);
     actionMenu->addAction(brbDiagnosisAction);
     connect(brbDiagnosisAction, &QAction::triggered, this, &FMFD::runBRBDiagnosis);
 
@@ -399,8 +396,8 @@ void FMFD::setupUi()
 
     configMenu->addSeparator();
 
-    // ============ BRB Python路径配置 ============
-    QAction* brbPathConfigAction = new QAction(tr("BRB Python路径配置"), this);
+    // ============ BRB路径配置 ============
+    QAction* brbPathConfigAction = new QAction(tr("BRB诊断路径配置"), this);
     configMenu->addAction(brbPathConfigAction);
     connect(brbPathConfigAction, &QAction::triggered, this, &FMFD::configureBRBPaths);
 
@@ -1313,32 +1310,14 @@ void FMFD::openUsageDialog()
 void FMFD::configureBRBPaths()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("BRB Python路径配置"));
+    dialog.setWindowTitle(tr("BRB诊断路径配置"));
     dialog.setMinimumWidth(600);
 
     QVBoxLayout* layout = new QVBoxLayout(&dialog);
 
-    // Python解释器路径
-    QHBoxLayout* pythonLayout = new QHBoxLayout();
-    pythonLayout->addWidget(new QLabel(tr("Python解释器路径:")));
-    QLineEdit* pythonEdit = new QLineEdit(m_brbPythonPath, &dialog);
-    pythonLayout->addWidget(pythonEdit);
-    QPushButton* browsePythonBtn = new QPushButton(tr("浏览..."), &dialog);
-    pythonLayout->addWidget(browsePythonBtn);
-    layout->addLayout(pythonLayout);
-
-    // Python脚本路径
-    QHBoxLayout* scriptLayout = new QHBoxLayout();
-    scriptLayout->addWidget(new QLabel(tr("Python脚本路径:")));
-    QLineEdit* scriptEdit = new QLineEdit(m_brbScriptPath, &dialog);
-    scriptLayout->addWidget(scriptEdit);
-    QPushButton* browseScriptBtn = new QPushButton(tr("浏览..."), &dialog);
-    scriptLayout->addWidget(browseScriptBtn);
-    layout->addLayout(scriptLayout);
-
     // EXE路径
     QHBoxLayout* exeLayout = new QHBoxLayout();
-    exeLayout->addWidget(new QLabel(tr("打包EXE路径:")));
+    exeLayout->addWidget(new QLabel(tr("BRB诊断EXE路径:")));
     QLineEdit* exeEdit = new QLineEdit(m_brbExePath, &dialog);
     exeLayout->addWidget(exeEdit);
     QPushButton* browseExeBtn = new QPushButton(tr("浏览..."), &dialog);
@@ -1351,15 +1330,13 @@ void FMFD::configureBRBPaths()
     helpText->setMaximumHeight(150);
     helpText->setPlainText(
         tr("说明：\n"
-            "1. Python解释器路径：用于运行Python脚本\n"
-            "   - 可以是 python、python3 或虚拟环境中的python.exe完整路径\n"
-            "   - 如遇到NumPy/Pandas版本兼容性问题，请指定虚拟环境的Python路径\n"
-            "   - 示例：E:\\Anaconda3\\envs\\tf_12\\python.exe\n"
-            "2. Python脚本路径：brb_diagnosis_cli.py的完整路径\n"
-            "3. 打包EXE路径：Python脚本打包后的exe文件路径\n"
-            "   （默认：程序目录/x64/Release/brb_diagnosis.exe）\n"
-            "系统会优先使用EXE，如果不存在则使用Python脚本。\n"
-            "配置将自动保存，下次启动时会自动加载。")
+            "1. BRB诊断EXE路径：打包后的brb_diagnosis.exe文件路径\n"
+            "   - 默认路径：应用程序目录/BRB/brb_diagnosis.exe\n"
+            "   - 该exe文件已包含所有依赖，不需要Python环境\n"
+            "   - 类似于viz-cli.exe，可直接在目标机器上运行\n"
+            "2. 配置将自动保存，下次启动时会自动加载。\n"
+            "3. 如需重新打包exe，请在Python项目中使用PyInstaller：\n"
+            "   pyinstaller --onefile brb_diagnosis_cli.py")
     );
     layout->addWidget(helpText);
 
@@ -1373,18 +1350,6 @@ void FMFD::configureBRBPaths()
     layout->addLayout(btnLayout);
 
     // 浏览按钮连接
-    connect(browsePythonBtn, &QPushButton::clicked, [&]() {
-        QString path = QFileDialog::getOpenFileName(&dialog, tr("选择Python解释器"),
-            pythonEdit->text(), tr("可执行文件 (*.exe);;所有文件 (*)"));
-        if (!path.isEmpty()) pythonEdit->setText(path);
-        });
-
-    connect(browseScriptBtn, &QPushButton::clicked, [&]() {
-        QString path = QFileDialog::getOpenFileName(&dialog, tr("选择Python脚本"),
-            scriptEdit->text(), tr("Python文件 (*.py);;所有文件 (*)"));
-        if (!path.isEmpty()) scriptEdit->setText(path);
-        });
-
     connect(browseExeBtn, &QPushButton::clicked, [&]() {
         QString path = QFileDialog::getOpenFileName(&dialog, tr("选择BRB诊断EXE"),
             exeEdit->text(), tr("可执行文件 (*.exe);;所有文件 (*)"));
@@ -1392,14 +1357,10 @@ void FMFD::configureBRBPaths()
         });
 
     connect(okBtn, &QPushButton::clicked, [&]() {
-        m_brbPythonPath = pythonEdit->text();
-        m_brbScriptPath = scriptEdit->text();
         m_brbExePath = exeEdit->text();
 
         // 保存配置到QSettings
         QSettings settings("FMFD", "FMFD-Software");
-        settings.setValue("BRB/PythonPath", m_brbPythonPath);
-        settings.setValue("BRB/ScriptPath", m_brbScriptPath);
         settings.setValue("BRB/ExePath", m_brbExePath);
 
         dialog.accept();
@@ -1432,53 +1393,30 @@ void FMFD::runBRBDiagnosis()
         return;
     }
 
+    // 检查exe是否存在
+    if (!QFileInfo::exists(m_brbExePath)) {
+        QMessageBox::critical(this, tr("错误"),
+            tr("BRB诊断程序不存在: %1\n\n请在菜单栏'配置'->'BRB诊断路径配置'中设置正确的路径。\n\n提示：该程序应该已包含在安装包中，默认位置在应用程序目录/BRB/brb_diagnosis.exe").arg(m_brbExePath));
+        return;
+    }
+
     // 设置输出文件路径
     QString outputFile = QCoreApplication::applicationDirPath() + "/brb_diagnosis_result.json";
 
     m_diagText->append(tr("[BRB诊断] 开始诊断..."));
     m_diagText->append(tr("[BRB诊断] 输入文件: %1").arg(inputFile));
     m_diagText->append(tr("[BRB诊断] 输出文件: %1").arg(outputFile));
+    m_diagText->append(tr("[BRB诊断] 使用EXE: %1").arg(m_brbExePath));
 
-    // 优先使用exe，如果不存在则使用Python脚本
-    bool useExe = QFileInfo::exists(m_brbExePath);
-
-    QString program;
+    QString program = m_brbExePath;
     QStringList arguments;
-
-    if (useExe) {
-        program = m_brbExePath;
-        arguments << "--input" << inputFile << "--output" << outputFile << "--verbose";
-        m_diagText->append(tr("[BRB诊断] 使用EXE: %1").arg(m_brbExePath));
-    }
-    else {
-        program = m_brbPythonPath;
-        arguments << m_brbScriptPath << "--input" << inputFile << "--output" << outputFile << "--verbose";
-        m_diagText->append(tr("[BRB诊断] 使用Python脚本: %1").arg(m_brbScriptPath));
-        m_diagText->append(tr("[BRB诊断] Python解释器: %1").arg(m_brbPythonPath));
-
-        if (!QFileInfo::exists(m_brbScriptPath)) {
-            QMessageBox::critical(this, tr("错误"),
-                tr("Python脚本不存在: %1\n请在配置中设置正确的路径。").arg(m_brbScriptPath));
-            return;
-        }
-
-        // 提示用户可以配置Python路径
-        if (m_brbPythonPath == "python" || m_brbPythonPath == "python3") {
-            m_diagText->append(tr("[提示] 当前使用系统默认Python，如遇到环境问题请通过'配置'->'BRB Python路径配置'设置虚拟环境路径"));
-        }
-    }
+    arguments << "--input" << inputFile << "--output" << outputFile << "--verbose";
 
     m_diagText->append(tr("[BRB诊断] 执行命令: %1 %2").arg(program, arguments.join(" ")));
 
     // 设置工作目录为应用程序目录（与viz-cli.exe相同的方式）
     QString appDir = QCoreApplication::applicationDirPath();
     m_brbProc->setWorkingDirectory(appDir);
-
-    // 继承系统环境变量，确保使用配置好的Python环境
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    // 设置Python输出编码为UTF-8，避免中文乱码
-    env.insert("PYTHONIOENCODING", "utf-8");
-    m_brbProc->setProcessEnvironment(env);
 
     m_brbProc->setProgram(program);
     m_brbProc->setArguments(arguments);
@@ -1507,20 +1445,6 @@ void FMFD::onBRBDiagnosisReadyRead()
     if (!stdErr.isEmpty()) {
         QString error = QString::fromUtf8(stdErr);
         m_diagText->append(tr("[BRB错误] %1").arg(error));
-
-        // 检测常见的Python环境问题
-        if (error.contains("AttributeError") && error.contains("numpy") && error.contains("bool")) {
-            m_diagText->append(tr("\n[提示] 检测到NumPy版本兼容性问题！"));
-            m_diagText->append(tr("[提示] 这通常是因为使用了不兼容版本的NumPy和Pandas。"));
-            m_diagText->append(tr("[提示] 解决方法："));
-            m_diagText->append(tr("[提示] 1. 在菜单栏选择 '配置' -> 'BRB Python路径配置'"));
-            m_diagText->append(tr("[提示] 2. 将'Python解释器路径'设置为兼容环境的Python可执行文件"));
-            m_diagText->append(tr("[提示] 3. 例如：E:\\Anaconda3\\envs\\tf_12\\python.exe"));
-        }
-        else if (error.contains("ModuleNotFoundError") || error.contains("ImportError")) {
-            m_diagText->append(tr("\n[提示] 检测到Python模块导入错误！"));
-            m_diagText->append(tr("[提示] 请确保所需的Python包已安装在配置的Python环境中。"));
-        }
     }
 }
 

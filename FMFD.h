@@ -134,11 +134,9 @@ private:
     // 用于并发控制：当一个 viz 进程在运行时，保存最新的挂起 mode（-1 表示无挂起）
     int m_pendingVizMode = -1;
 
-    // ============ BRB诊断Python集成 ============
+    // ============ BRB诊断集成 ============
     QProcess* m_brbProc = nullptr;
-    QString m_brbPythonPath = QStringLiteral("python");  // Python解释器路径，可配置
-    QString m_brbScriptPath;  // Python脚本路径，通过配置对话框设置
-    QString m_brbExePath;     // 打包后的exe路径，通过配置对话框设置或使用默认路径
+    QString m_brbExePath;     // BRB诊断exe路径，通过配置对话框设置或使用默认路径
 
     // ============ 图像显示 ============
     QLabel* m_instrImage = nullptr;
@@ -184,7 +182,7 @@ private slots:
     void onPythonFinished(int exitCode, QProcess::ExitStatus status);
     void onPythonReadyRead();
 
-    // ============ BRB诊断Python集成 ============
+    // ============ BRB诊断集成 ============
     void runBRBDiagnosis();
     void onBRBDiagnosisFinished(int exitCode, QProcess::ExitStatus status);
     void onBRBDiagnosisReadyRead();
