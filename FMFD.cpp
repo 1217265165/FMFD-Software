@@ -303,7 +303,7 @@ FMFD::FMFD(QWidget* parent)
     QSettings settings("FMFD", "FMFD-Software");
     m_brbPythonPath = settings.value("BRB/PythonPath", "python").toString();
     m_brbScriptPath = settings.value("BRB/ScriptPath", "D:/PycharmProjects/FMFD/FMFD/brb_diagnosis_cli.py").toString();
-    m_brbExePath = settings.value("BRB/ExePath", QCoreApplication::applicationDirPath() + "/x64/Release/brb_diagnosis.exe").toString();
+    m_brbExePath = settings.value("BRB/ExePath", QCoreApplication::applicationDirPath() + "/x64/Release/BRB/brb_diagnosis.exe").toString();
 
     // 初始化配置
     m_currentConfig.mode = FrequencySweepConfig::Mode::SegmentGeneration;
