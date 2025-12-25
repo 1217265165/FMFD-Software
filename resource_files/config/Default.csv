@@ -1,0 +1,25 @@
+SCHEME_NAME,Default
+FREQUENCY_SWEEP_CONFIG
+mode,1
+freqFilePath,
+segments_count,0
+SPECTRUM_ANALYZER_CONFIG
+refLevelDbm,0
+attenuatorDb,0
+preampEnabled,0
+rbwAutoMode,1
+rbwHz,10000
+vbwSameAsRbw,1
+vbwHz,10000
+couplingMode,AC
+measurementMode,NORMAL
+amplitudeDbm,0
+resolutionHz,1000
+SIGNAL_GENERATOR_CONFIG
+powerDbm,0
+frequencyCompensationEnabled,0
+powerCompensationEnabled,0
+outputConnector,RF OUT
+powerFlatteningEnabled,0
+modulationMode,OFF
+outputEnabled,1
