@@ -8,23 +8,6 @@
 #include <string>
 #include <functional>
 
-//// ============= 频率扫描分段配置 =============
-//struct FrequencySweepSegment {
-//    double startHz;
-//    double stopHz;
-//    double stepHz;
-//};
-//
-//// ============= 频率扫描总配置 =============
-//struct FrequencySweepConfig {
-//    enum Mode { SegmentedList, FileImport } mode;
-//    std::vector<FrequencySweepSegment> segments;  // 分段模式使用
-//    std::string freqFilePath;                     // 文件导入模式使用
-//    //double powerDbm = 0.0;
-//    //double rbw = 10000.0;
-//    //std::string vbwMode = "same";
-//};
-
 class DataAcquisitionService {
 public:
     using StatusCallback = std::function<void(const std::string&)>;

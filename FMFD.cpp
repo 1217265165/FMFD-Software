@@ -297,13 +297,15 @@ FMFD::FMFD(QWidget* parent)
     m_brbProc = new QProcess(this);  // 初始化BRB诊断进程
     m_dataAcquisitionService = std::make_unique<DataAcquisitionService>();
 
-    // 初始化BRB路径（默认值，可通过配置对话框修改）
-    // 注意：开发环境默认路径，生产环境应通过配置对话框设置实际路径
-    // 从配置文件加载保存的路径，如果没有则使用默认值
+    // 清除旧的错误设置（可选，仅第一次需要）
     QSettings settings("FMFD", "FMFD-Software");
+     //settings.remove("BRB/ExePath");  // 取消注释可清除一次
+
+    // 现在使用正确的路径拼接方式
+    QDir appDir(QCoreApplication::applicationDirPath());
     m_brbPythonPath = settings.value("BRB/PythonPath", "python").toString();
     m_brbScriptPath = settings.value("BRB/ScriptPath", "D:/PycharmProjects/FMFD/FMFD/brb_diagnosis_cli.py").toString();
-    m_brbExePath = settings.value("BRB/ExePath", QCoreApplication::applicationDirPath() + "/x64/Release/BRB/brb_diagnosis.exe").toString();
+    m_brbExePath = settings.value("BRB/ExePath", appDir.filePath("BRB/brb_diagnosis.exe")).toString();
 
     // 初始化配置
     m_currentConfig.mode = FrequencySweepConfig::Mode::SegmentGeneration;
@@ -446,9 +448,9 @@ void FMFD::setupUi()
     QGroupBox* resBox = new QGroupBox(tr("Instruments (VISA resources)"), this);
     QHBoxLayout* resLayout = new QHBoxLayout();
     m_sgResourceEdit = new QLineEdit(this);
-    m_sgResourceEdit->setText(tr("TCPIP::192.168.1.200::5025::SOCKET"));
+    m_sgResourceEdit->setText(tr("TCPIP0::192.168.1.200::5025::SOCKET"));
     m_saResourceEdit = new QLineEdit(this);
-    m_saResourceEdit->setText(tr("TCPIP::192.168.1.100::5025::SOCKET"));
+    m_saResourceEdit->setText(tr("TCPIP0::192.168.1.100::5025::SOCKET"));
     resLayout->addWidget(new QLabel(tr("SG:")));
     resLayout->addWidget(m_sgResourceEdit);
     resLayout->addWidget(new QLabel(tr("SA:")));
@@ -1357,7 +1359,7 @@ void FMFD::configureBRBPaths()
             "   - 示例：E:\\Anaconda3\\envs\\tf_12\\python.exe\n"
             "2. Python脚本路径：brb_diagnosis_cli.py的完整路径\n"
             "3. 打包EXE路径：Python脚本打包后的exe文件路径\n"
-            "   （默认：程序目录/x64/Release/brb_diagnosis.exe）\n"
+            "   （默认：程序目录/x64/Release/BRB/brb_diagnosis.exe）\n"
             "系统会优先使用EXE，如果不存在则使用Python脚本。\n"
             "配置将自动保存，下次启动时会自动加载。")
     );

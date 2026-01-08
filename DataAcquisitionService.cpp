@@ -246,7 +246,6 @@ void DataAcquisitionService::frequencyResponseThreadFunction(const std::vector<d
 
         SaConfiguration saConfig{ freqHz, rbwHz, dynamicSpan, refLevel, vbwToUse, 1001 };
         if (!m_controller->configureSpectrumAnalyzer(saConfig)) {
-            logStatus("频谱仪配置失败: " + std::to_string(freqHz) + " Hz");
             continue;
         }
         logStatus("频谱仪已配置: " + std::to_string(freqHz / 1e6) + " MHz");
@@ -258,14 +257,22 @@ void DataAcquisitionService::frequencyResponseThreadFunction(const std::vector<d
         logStatus("信号源已配置: " + std::to_string(freqHz / 1e6) + " MHz");
 
         // ======================== 三阶段等待逻辑 ========================
-        logStatus("等待信号源稳定(200ms)...");
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-        logStatus("等待频谱仪扫频完成(200ms)...");
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-        logStatus("等待测量数据稳定(100ms)...");
+        // 说明：本程序中的“频响”定义为——信号发生器在每个 freqHz 处逐点步进注入单频激励，频谱仪完成一次扫频后读取该频点处
+        // marker 的峰值幅度（peak dBm），将 (freqHz, peakDbm) 串联形成频率响应曲线。
+        // 因此每个频点必须保证：①信号源切换后已锁定且输出幅度稳定；②频谱仪已完成“新一帧”扫频并刷新 trace（避免读到上一帧
+        // 或半截扫频数据）；③检波/平均/VBW 平滑后的读数已收敛（避免瞬态抖动）。
+        // 这三个等待并非随意常数，推荐按仪器配置自适应：等待扫频完成应优先依据 sweepTime（≈1.2×sweepTime+通信余量）或使用
+        // Single Sweep + OPC/扫频完成标志；若开启 trace averaging，应至少覆盖足够的扫频轮次以保证峰值稳定。若出现“包络内但局部
+        // 突变/非切换点尖峰”等异常误判，通常首先应检查是否存在扫频未完成或读到旧 trace 的问题，再调整 t_sweep/t_meas。
+        // =============================================================
+        logStatus("等待信号源稳定(ms)...");
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        logStatus("等待频谱仪扫频完成(ms)...");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+        logStatus("等待测量数据稳定(ms)...");
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
         logStatus("读取峰值: " + std::to_string(freqHz / 1e6) + " MHz");
         PeakMeasurement peak = m_controller->readMarkerPeak();

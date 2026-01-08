@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstdlib>
 
-#define SIMULATION_MODE 0  // 0 = 真机模式
+#define SIMULATION_MODE 1  // 0 = 真机模式
 
 InstrumentController::InstrumentController() {}
 
@@ -420,31 +420,3 @@ std::string InstrumentController::getInstrumentInfo(bool isSA)
 }
 
 
-
-
-//ViStatus InstrumentController::setInputCoupling(const QString& mode)
-//{
-//    if (!isConnected()) return VI_ERROR_INV_SESSION;
-//
-//    QString command = "INPut:COUPling " + mode;
-//    ViStatus status = viWrite(m_session,
-//        (ViBuf)command.toLatin1().data(),
-//        command.length(),
-//        nullptr);
-//    return status;
-//}
-//
-//ViStatus InstrumentController::getInputCoupling(QString& mode)
-//{
-//    if (!isConnected()) return VI_ERROR_INV_SESSION;
-//
-//    char rdBuf[20] = { 0 };
-//    long retCnt = 0;
-//
-//    ViStatus status = viWrite(m_session, "INPut:COUPling?", 15, &retCnt);
-//    if (status != VI_SUCCESS) return status;
-//
-//    status = viRead(m_session, (ViBuf)rdBuf, 20, &retCnt);
-//    mode = QString::fromLatin1(rdBuf, retCnt);
-//    return status;
-//}
