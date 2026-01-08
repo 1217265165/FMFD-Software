@@ -13,11 +13,13 @@ public:
     using StatusCallback = std::function<void(const std::string&)>;
     using DataCallback = std::function<void(const MeasurementData&)>;
     using FrequencyResponseCallback = std::function<void(double, double)>;
+    using CompletionCallback = std::function<void()>;
 
     DataAcquisitionService();
     ~DataAcquisitionService();
 
     void setCallbacks(StatusCallback statusCb, DataCallback dataCb, FrequencyResponseCallback freqRespCb);
+    void setCompletionCallback(CompletionCallback completionCb);
     bool initialize(const std::string& sgResource, const std::string& saResource);
 
     // ============= 采集入口（三种方式） =============
@@ -66,4 +68,5 @@ private:
     StatusCallback m_statusCallback;
     DataCallback m_dataCallback;
     FrequencyResponseCallback m_freqResponseCallback;
+    CompletionCallback m_completionCallback;
 };

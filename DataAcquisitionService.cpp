@@ -107,6 +107,10 @@ void DataAcquisitionService::setCallbacks(StatusCallback statusCb, DataCallback 
     m_freqResponseCallback = freqRespCb;
 }
 
+void DataAcquisitionService::setCompletionCallback(CompletionCallback completionCb) {
+    m_completionCallback = completionCb;
+}
+
 // ============= 初始化 =============
 bool DataAcquisitionService::initialize(const std::string& sgResource, const std::string& saResource) {
     bool success = m_controller->initializeInstruments(sgResource, saResource);
@@ -304,6 +308,11 @@ void DataAcquisitionService::frequencyResponseThreadFunction(const std::vector<d
     m_controller->setSignalGenerator(1e9, -100, false);
     m_isMeasuring = false;
     logStatus("频响采集完成");
+    
+    // 通知测量完成
+    if (m_completionCallback) {
+        m_completionCallback();
+    }
 }
 
 // ============= 日志接口 =============

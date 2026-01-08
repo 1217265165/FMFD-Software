@@ -35,6 +35,8 @@
 #include <QJsonObject>
 #include <QFile>
 #include <QSettings>
+#include <QPainter>
+#include <QTextStream>
 #include "CommonTypes.h"
 #include "brbengine.h"
 #include "ZoomableGraphicsView.h"
@@ -544,8 +546,11 @@ void FMFD::setupUi()
     m_imageButtonGroup->addButton(imageBtn1, 0);
     QRadioButton* imageBtn2 = new QRadioButton(tr("剩余响应测试连接示意图"), this);
     m_imageButtonGroup->addButton(imageBtn2, 1);
+    QRadioButton* imageBtn3 = new QRadioButton(tr("频响曲线"), this);
+    m_imageButtonGroup->addButton(imageBtn3, 2);
     imageSwitchLayout->addWidget(imageBtn1);
     imageSwitchLayout->addWidget(imageBtn2);
+    imageSwitchLayout->addWidget(imageBtn3);
     imageSwitchLayout->addStretch();
     leftLayout->addLayout(imageSwitchLayout);
 
@@ -716,6 +721,15 @@ void FMFD::setupConnections()
                     }, Qt::QueuedConnection);
             }
         );
+        
+        // 设置完成回调
+        m_dataAcquisitionService->setCompletionCallback(
+            [this]() {
+                QMetaObject::invokeMethod(this, [this]() {
+                    onAutomatedTestFinished();
+                    }, Qt::QueuedConnection);
+            }
+        );
     }
 
     // 配置对话框
@@ -820,6 +834,10 @@ void FMFD::onOneClickStartClicked()
         QMessageBox::warning(this, tr("Missing resources"), tr("Please fill SG and SA resource strings."));
         return;
     }
+    
+    // 清除之前的频响数据
+    clearFrequencyResponseData();
+    
     m_diagText->append("[自动采集] 初始化仪器...");
     bool ok = m_dataAcquisitionService->initialize(sg.toStdString(), sa.toStdString());
     if (!ok) {
@@ -873,6 +891,9 @@ void FMFD::onStartTestClicked()
 
 void FMFD::startAutomatedTest(const QStringList& frequencies, double powerDbm, double rbw, double span, const QString& vbwMode, int repeats)
 {
+    // 清除之前的频响数据
+    clearFrequencyResponseData();
+    
     if (!m_dataAcquisitionService) {
         m_diagText->append("Error: Data acquisition service not initialized");
         return;
@@ -942,6 +963,8 @@ void FMFD::onMeasurementData(const MeasurementData& data)
 
 void FMFD::onFrequencyResponse(double freqHz, double amplitude)
 {
+    // 存储频响数据点
+    m_frequencyResponseData.append(qMakePair(freqHz, amplitude));
     m_diagText->append(QString("[FREQ_RESP] %1 MHz: %2 dBm").arg(freqHz / 1e6, 0, 'f', 2).arg(amplitude, 0, 'f', 2));
 }
 
@@ -950,6 +973,17 @@ void FMFD::onAutomatedTestFinished()
     m_diagText->append("Automated test completed");
     m_oneClickBtn->setEnabled(true);
     m_stopBtn->setEnabled(false);
+    
+    // 测试结束后，自动切换到频响曲线显示
+    if (!m_frequencyResponseData.isEmpty()) {
+        // 选中频响曲线选项
+        QAbstractButton* freqRespButton = m_imageButtonGroup->button(2);
+        if (freqRespButton) {
+            freqRespButton->setChecked(true);
+            updateFrequencyResponsePlot();
+            m_diagText->append(tr("[频响曲线] 测试完成，已自动切换到频响曲线显示"));
+        }
+    }
 }
 
 void FMFD::onNewMeasurement(const QMap<QString, double>& features)
@@ -1066,22 +1100,30 @@ void FMFD::resizeEvent(QResizeEvent* event)
 {
     QMainWindow::resizeEvent(event);
     int fixedHeight = int(this->height() * 0.4);
-    QString currentImagePath;
     int checkedId = m_imageButtonGroup->checkedId();
-    if (checkedId == 0) {
-        currentImagePath = "./resource_files/icons/频响.png";
+    
+    if (checkedId == 2) {
+        // 频响曲线选项 - 重新绘制曲线以适应新尺寸
+        updateFrequencyResponsePlot();
     }
     else {
-        currentImagePath = "./resource_files/icons/剩余响应.png";
+        QString currentImagePath;
+        if (checkedId == 0) {
+            currentImagePath = "./resource_files/icons/频响.png";
+        }
+        else {
+            currentImagePath = "./resource_files/icons/剩余响应.png";
+        }
+        QPixmap iconPixmap(currentImagePath);
+        double aspect = iconPixmap.width() * 1.0 / iconPixmap.height();
+        int scaledWidth = int(fixedHeight * aspect);
+        m_instrImage->setPixmap(iconPixmap.scaled(scaledWidth, fixedHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        m_instrImage->setMinimumHeight(fixedHeight);
+        m_instrImage->setMaximumHeight(fixedHeight);
+        m_instrImage->setMinimumWidth(scaledWidth);
+        m_instrImage->setMaximumWidth(scaledWidth);
     }
-    QPixmap iconPixmap(currentImagePath);
-    double aspect = iconPixmap.width() * 1.0 / iconPixmap.height();
-    int scaledWidth = int(fixedHeight * aspect);
-    m_instrImage->setPixmap(iconPixmap.scaled(scaledWidth, fixedHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    m_instrImage->setMinimumHeight(fixedHeight);
-    m_instrImage->setMaximumHeight(fixedHeight);
-    m_instrImage->setMinimumWidth(scaledWidth);
-    m_instrImage->setMaximumWidth(scaledWidth);
+    
     QList<QGroupBox*> diagBoxes = findChildren<QGroupBox*>(tr("Fault Diagnosis (BRB Output)"));
     if (!diagBoxes.isEmpty()) {
         QGroupBox* diagBox = diagBoxes.first();
@@ -1100,6 +1142,11 @@ void FMFD::onImageButtonClicked(QAbstractButton* button)
     }
     else if (buttonId == 1) {
         imagePath = "./resource_files/icons/剩余响应.png";
+    }
+    else if (buttonId == 2) {
+        // 频响曲线选项 - 显示频响曲线图
+        updateFrequencyResponsePlot();
+        return;
     }
     if (!imagePath.isEmpty()) {
         QPixmap iconPixmap(imagePath);
@@ -1434,6 +1481,17 @@ void FMFD::runBRBDiagnosis()
         return;
     }
 
+    // 加载CSV文件数据用于频响曲线显示
+    if (loadCsvForFrequencyResponse(inputFile)) {
+        // 自动切换到频响曲线显示
+        QAbstractButton* freqRespButton = m_imageButtonGroup->button(2);
+        if (freqRespButton) {
+            freqRespButton->setChecked(true);
+            updateFrequencyResponsePlot();
+            m_diagText->append(tr("[频响曲线] 已从BRB诊断CSV文件加载数据并显示"));
+        }
+    }
+
     // 设置输出文件路径
     QString outputFile = QCoreApplication::applicationDirPath() + "/brb_diagnosis_result.json";
 
@@ -1626,4 +1684,246 @@ void FMFD::onBRBDiagnosisFinished(int exitCode, QProcess::ExitStatus status)
         QMessageBox::warning(this, tr("诊断失败"),
             tr("BRB诊断进程异常退出（退出码: %1）\n请查看日志获取详细信息。").arg(exitCode));
     }
+}
+
+// ============ 频响曲线相关函数实现 ============
+
+void FMFD::clearFrequencyResponseData()
+{
+    m_frequencyResponseData.clear();
+}
+
+bool FMFD::loadCsvForFrequencyResponse(const QString& csvFilePath)
+{
+    QFile file(csvFilePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        m_diagText->append(tr("[频响曲线] 无法打开CSV文件: %1").arg(csvFilePath));
+        return false;
+    }
+
+    m_frequencyResponseData.clear();
+    QTextStream in(&file);
+    bool isFirstLine = true;
+
+    while (!in.atEnd()) {
+        QString line = in.readLine().trimmed();
+        if (line.isEmpty()) continue;
+
+        // 跳过标题行
+        if (isFirstLine) {
+            isFirstLine = false;
+            if (line.contains("Frequency") || line.contains("frequency") || line.contains("Hz")) {
+                continue;
+            }
+        }
+
+        QStringList parts = line.split(',');
+        if (parts.size() >= 3) {
+            // CSV格式: Frequency(Hz), Frequency(MHz), Amplitude(dBm)
+            bool okFreq = false, okAmp = false;
+            double freqHz = parts[0].trimmed().toDouble(&okFreq);
+            double amplitude = parts[2].trimmed().toDouble(&okAmp);
+            if (okFreq && okAmp) {
+                m_frequencyResponseData.append(qMakePair(freqHz, amplitude));
+            }
+        }
+        else if (parts.size() >= 2) {
+            // CSV格式: Frequency(Hz), Amplitude(dBm)
+            bool okFreq = false, okAmp = false;
+            double freqHz = parts[0].trimmed().toDouble(&okFreq);
+            double amplitude = parts[1].trimmed().toDouble(&okAmp);
+            if (okFreq && okAmp) {
+                m_frequencyResponseData.append(qMakePair(freqHz, amplitude));
+            }
+        }
+    }
+
+    file.close();
+    m_lastBrbCsvFile = csvFilePath;
+    m_diagText->append(tr("[频响曲线] 已从CSV文件加载 %1 个数据点").arg(m_frequencyResponseData.size()));
+    return !m_frequencyResponseData.isEmpty();
+}
+
+void FMFD::updateFrequencyResponsePlot()
+{
+    if (m_frequencyResponseData.isEmpty()) {
+        // 显示提示信息
+        int fixedHeight = int(this->height() * 0.4);
+        int plotWidth = int(fixedHeight * 1.6);  // 宽高比约1.6:1
+        
+        QPixmap plotPixmap(plotWidth, fixedHeight);
+        plotPixmap.fill(Qt::white);
+        
+        QPainter painter(&plotPixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+        
+        // 绘制边框
+        painter.setPen(QPen(Qt::gray, 1));
+        painter.drawRect(0, 0, plotWidth - 1, fixedHeight - 1);
+        
+        // 绘制提示文字
+        painter.setPen(Qt::darkGray);
+        QFont font = painter.font();
+        font.setPointSize(12);
+        painter.setFont(font);
+        painter.drawText(plotPixmap.rect(), Qt::AlignCenter, tr("暂无频响数据\n请先进行一键测试或运行BRB诊断加载CSV文件"));
+        
+        painter.end();
+        
+        m_instrImage->setPixmap(plotPixmap);
+        m_instrImage->setMinimumHeight(fixedHeight);
+        m_instrImage->setMaximumHeight(fixedHeight);
+        m_instrImage->setMinimumWidth(plotWidth);
+        m_instrImage->setMaximumWidth(plotWidth);
+        return;
+    }
+
+    // 计算数据范围
+    double minFreq = m_frequencyResponseData.first().first;
+    double maxFreq = m_frequencyResponseData.first().first;
+    double minAmp = m_frequencyResponseData.first().second;
+    double maxAmp = m_frequencyResponseData.first().second;
+
+    for (const auto& point : m_frequencyResponseData) {
+        minFreq = qMin(minFreq, point.first);
+        maxFreq = qMax(maxFreq, point.first);
+        minAmp = qMin(minAmp, point.second);
+        maxAmp = qMax(maxAmp, point.second);
+    }
+
+    // 添加边距
+    double freqRange = maxFreq - minFreq;
+    double ampRange = maxAmp - minAmp;
+    if (freqRange < 1e-6) freqRange = 1e6;  // 防止除零
+    if (ampRange < 1e-6) ampRange = 10.0;   // 防止除零
+
+    // 扩展范围以留出边距
+    minAmp -= ampRange * 0.1;
+    maxAmp += ampRange * 0.1;
+    ampRange = maxAmp - minAmp;
+
+    // 创建绘图区域
+    int fixedHeight = int(this->height() * 0.4);
+    int plotWidth = int(fixedHeight * 1.6);  // 宽高比约1.6:1
+    
+    QPixmap plotPixmap(plotWidth, fixedHeight);
+    plotPixmap.fill(Qt::white);
+    
+    QPainter painter(&plotPixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // 绘图区域边距
+    int marginLeft = 60;
+    int marginRight = 20;
+    int marginTop = 30;
+    int marginBottom = 50;
+
+    int plotAreaWidth = plotWidth - marginLeft - marginRight;
+    int plotAreaHeight = fixedHeight - marginTop - marginBottom;
+
+    // 绘制背景网格
+    painter.setPen(QPen(QColor(220, 220, 220), 1));
+    int gridCountX = 10;
+    int gridCountY = 8;
+    for (int i = 0; i <= gridCountX; ++i) {
+        int x = marginLeft + i * plotAreaWidth / gridCountX;
+        painter.drawLine(x, marginTop, x, marginTop + plotAreaHeight);
+    }
+    for (int i = 0; i <= gridCountY; ++i) {
+        int y = marginTop + i * plotAreaHeight / gridCountY;
+        painter.drawLine(marginLeft, y, marginLeft + plotAreaWidth, y);
+    }
+
+    // 绘制坐标轴
+    painter.setPen(QPen(Qt::black, 2));
+    painter.drawLine(marginLeft, marginTop + plotAreaHeight, marginLeft + plotAreaWidth, marginTop + plotAreaHeight);  // X轴
+    painter.drawLine(marginLeft, marginTop, marginLeft, marginTop + plotAreaHeight);  // Y轴
+
+    // 绘制刻度标签
+    painter.setPen(Qt::black);
+    QFont labelFont = painter.font();
+    labelFont.setPointSize(8);
+    painter.setFont(labelFont);
+
+    // X轴标签 (频率)
+    for (int i = 0; i <= 5; ++i) {
+        int x = marginLeft + i * plotAreaWidth / 5;
+        double freq = minFreq + i * freqRange / 5;
+        QString label;
+        if (freq >= 1e9) {
+            label = QString::number(freq / 1e9, 'f', 2) + " GHz";
+        }
+        else if (freq >= 1e6) {
+            label = QString::number(freq / 1e6, 'f', 1) + " MHz";
+        }
+        else if (freq >= 1e3) {
+            label = QString::number(freq / 1e3, 'f', 0) + " kHz";
+        }
+        else {
+            label = QString::number(freq, 'f', 0) + " Hz";
+        }
+        QRect textRect(x - 40, marginTop + plotAreaHeight + 5, 80, 20);
+        painter.drawText(textRect, Qt::AlignCenter, label);
+    }
+
+    // Y轴标签 (幅度)
+    for (int i = 0; i <= 4; ++i) {
+        int y = marginTop + plotAreaHeight - i * plotAreaHeight / 4;
+        double amp = minAmp + i * ampRange / 4;
+        QString label = QString::number(amp, 'f', 1) + " dBm";
+        QRect textRect(5, y - 10, marginLeft - 10, 20);
+        painter.drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, label);
+    }
+
+    // 绘制标题
+    QFont titleFont = painter.font();
+    titleFont.setPointSize(10);
+    titleFont.setBold(true);
+    painter.setFont(titleFont);
+    painter.drawText(QRect(0, 5, plotWidth, 20), Qt::AlignCenter, tr("频率响应曲线"));
+
+    // X轴标题
+    labelFont.setBold(false);
+    painter.setFont(labelFont);
+    painter.drawText(QRect(marginLeft, fixedHeight - 15, plotAreaWidth, 15), Qt::AlignCenter, tr("频率"));
+
+    // 绘制频响曲线
+    if (m_frequencyResponseData.size() > 1) {
+        painter.setPen(QPen(QColor(0, 100, 200), 2));
+        
+        QPolygonF curve;
+        for (const auto& point : m_frequencyResponseData) {
+            double x = marginLeft + (point.first - minFreq) / freqRange * plotAreaWidth;
+            double y = marginTop + plotAreaHeight - (point.second - minAmp) / ampRange * plotAreaHeight;
+            curve << QPointF(x, y);
+        }
+        
+        painter.drawPolyline(curve);
+        
+        // 绘制数据点标记（如果数据点不太多）
+        if (m_frequencyResponseData.size() <= 100) {
+            painter.setPen(QPen(QColor(200, 50, 50), 1));
+            painter.setBrush(QColor(200, 50, 50));
+            for (const auto& point : m_frequencyResponseData) {
+                double x = marginLeft + (point.first - minFreq) / freqRange * plotAreaWidth;
+                double y = marginTop + plotAreaHeight - (point.second - minAmp) / ampRange * plotAreaHeight;
+                painter.drawEllipse(QPointF(x, y), 3, 3);
+            }
+        }
+    }
+
+    // 绘制数据点数量信息
+    painter.setPen(Qt::darkGray);
+    labelFont.setPointSize(8);
+    painter.setFont(labelFont);
+    QString infoText = tr("数据点: %1").arg(m_frequencyResponseData.size());
+    painter.drawText(QRect(plotWidth - 100, 5, 95, 15), Qt::AlignRight, infoText);
+
+    painter.end();
+
+    m_instrImage->setPixmap(plotPixmap);
+    m_instrImage->setMinimumHeight(fixedHeight);
+    m_instrImage->setMaximumHeight(fixedHeight);
+    m_instrImage->setMinimumWidth(plotWidth);
+    m_instrImage->setMaximumWidth(plotWidth);
 }

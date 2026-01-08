@@ -144,6 +144,9 @@ private:
     QLabel* m_instrImage = nullptr;
     QButtonGroup* m_imageButtonGroup = nullptr;
 
+    // ============ 频响曲线数据存储 ============
+    QVector<QPair<double, double>> m_frequencyResponseData;  // (frequency_Hz, amplitude_dBm)
+    QString m_lastBrbCsvFile;  // BRB诊断加载的CSV文件路径
 
     // 方案
     TestScheme m_currentScheme;
@@ -229,6 +232,11 @@ private:
 
     // ============ 辅助函数 ============
     void refreshFeatureTable(const QMap<QString, double>& features);
+
+    // ============ 频响曲线相关 ============
+    void updateFrequencyResponsePlot();
+    bool loadCsvForFrequencyResponse(const QString& csvFilePath);
+    void clearFrequencyResponseData();
 
     // ============ 自动化测试方法 ============
     void startAutomatedTest(const QStringList& frequencies, double powerDbm, double rbw,
