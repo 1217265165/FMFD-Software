@@ -1688,9 +1688,51 @@ void FMFD::onBRBDiagnosisFinished(int exitCode, QProcess::ExitStatus status)
 
 // ============ 频响曲线相关函数实现 ============
 
+// 频响曲线绘图常量
+namespace FreqResponsePlotConstants {
+    // 数据处理常量
+    constexpr double MIN_FREQ_RANGE = 1e6;      // 最小频率范围，防止除零
+    constexpr double MIN_AMP_RANGE = 10.0;      // 最小幅度范围，防止除零
+    constexpr double EPSILON = 1e-6;            // 浮点比较阈值
+    constexpr double RANGE_MARGIN_RATIO = 0.1;  // 数据范围边距比例
+    
+    // 绘图布局边距
+    constexpr int MARGIN_LEFT = 60;
+    constexpr int MARGIN_RIGHT = 20;
+    constexpr int MARGIN_TOP = 30;
+    constexpr int MARGIN_BOTTOM = 50;
+    
+    // 网格线数量
+    constexpr int GRID_COUNT_X = 10;
+    constexpr int GRID_COUNT_Y = 8;
+    
+    // 数据点标记阈值
+    constexpr int MAX_POINTS_FOR_MARKERS = 100;
+}
+
 void FMFD::clearFrequencyResponseData()
 {
     m_frequencyResponseData.clear();
+}
+
+// 辅助函数：解析CSV行数据
+static bool parseCsvLineForFrequencyResponse(const QStringList& parts, double& freqHz, double& amplitude)
+{
+    if (parts.size() >= 3) {
+        // CSV格式: Frequency(Hz), Frequency(MHz), Amplitude(dBm)
+        bool okFreq = false, okAmp = false;
+        freqHz = parts[0].trimmed().toDouble(&okFreq);
+        amplitude = parts[2].trimmed().toDouble(&okAmp);
+        return okFreq && okAmp;
+    }
+    else if (parts.size() >= 2) {
+        // CSV格式: Frequency(Hz), Amplitude(dBm)
+        bool okFreq = false, okAmp = false;
+        freqHz = parts[0].trimmed().toDouble(&okFreq);
+        amplitude = parts[1].trimmed().toDouble(&okAmp);
+        return okFreq && okAmp;
+    }
+    return false;
 }
 
 bool FMFD::loadCsvForFrequencyResponse(const QString& csvFilePath)
@@ -1718,23 +1760,9 @@ bool FMFD::loadCsvForFrequencyResponse(const QString& csvFilePath)
         }
 
         QStringList parts = line.split(',');
-        if (parts.size() >= 3) {
-            // CSV格式: Frequency(Hz), Frequency(MHz), Amplitude(dBm)
-            bool okFreq = false, okAmp = false;
-            double freqHz = parts[0].trimmed().toDouble(&okFreq);
-            double amplitude = parts[2].trimmed().toDouble(&okAmp);
-            if (okFreq && okAmp) {
-                m_frequencyResponseData.append(qMakePair(freqHz, amplitude));
-            }
-        }
-        else if (parts.size() >= 2) {
-            // CSV格式: Frequency(Hz), Amplitude(dBm)
-            bool okFreq = false, okAmp = false;
-            double freqHz = parts[0].trimmed().toDouble(&okFreq);
-            double amplitude = parts[1].trimmed().toDouble(&okAmp);
-            if (okFreq && okAmp) {
-                m_frequencyResponseData.append(qMakePair(freqHz, amplitude));
-            }
+        double freqHz = 0.0, amplitude = 0.0;
+        if (parseCsvLineForFrequencyResponse(parts, freqHz, amplitude)) {
+            m_frequencyResponseData.append(qMakePair(freqHz, amplitude));
         }
     }
 
@@ -1746,6 +1774,8 @@ bool FMFD::loadCsvForFrequencyResponse(const QString& csvFilePath)
 
 void FMFD::updateFrequencyResponsePlot()
 {
+    using namespace FreqResponsePlotConstants;
+    
     if (m_frequencyResponseData.isEmpty()) {
         // 显示提示信息
         int fixedHeight = int(this->height() * 0.4);
@@ -1794,12 +1824,12 @@ void FMFD::updateFrequencyResponsePlot()
     // 添加边距
     double freqRange = maxFreq - minFreq;
     double ampRange = maxAmp - minAmp;
-    if (freqRange < 1e-6) freqRange = 1e6;  // 防止除零
-    if (ampRange < 1e-6) ampRange = 10.0;   // 防止除零
+    if (freqRange < EPSILON) freqRange = MIN_FREQ_RANGE;  // 防止除零
+    if (ampRange < EPSILON) ampRange = MIN_AMP_RANGE;     // 防止除零
 
     // 扩展范围以留出边距
-    minAmp -= ampRange * 0.1;
-    maxAmp += ampRange * 0.1;
+    minAmp -= ampRange * RANGE_MARGIN_RATIO;
+    maxAmp += ampRange * RANGE_MARGIN_RATIO;
     ampRange = maxAmp - minAmp;
 
     // 创建绘图区域
@@ -1812,32 +1842,25 @@ void FMFD::updateFrequencyResponsePlot()
     QPainter painter(&plotPixmap);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    // 绘图区域边距
-    int marginLeft = 60;
-    int marginRight = 20;
-    int marginTop = 30;
-    int marginBottom = 50;
-
-    int plotAreaWidth = plotWidth - marginLeft - marginRight;
-    int plotAreaHeight = fixedHeight - marginTop - marginBottom;
+    // 绘图区域边距（使用常量）
+    int plotAreaWidth = plotWidth - MARGIN_LEFT - MARGIN_RIGHT;
+    int plotAreaHeight = fixedHeight - MARGIN_TOP - MARGIN_BOTTOM;
 
     // 绘制背景网格
     painter.setPen(QPen(QColor(220, 220, 220), 1));
-    int gridCountX = 10;
-    int gridCountY = 8;
-    for (int i = 0; i <= gridCountX; ++i) {
-        int x = marginLeft + i * plotAreaWidth / gridCountX;
-        painter.drawLine(x, marginTop, x, marginTop + plotAreaHeight);
+    for (int i = 0; i <= GRID_COUNT_X; ++i) {
+        int x = MARGIN_LEFT + i * plotAreaWidth / GRID_COUNT_X;
+        painter.drawLine(x, MARGIN_TOP, x, MARGIN_TOP + plotAreaHeight);
     }
-    for (int i = 0; i <= gridCountY; ++i) {
-        int y = marginTop + i * plotAreaHeight / gridCountY;
-        painter.drawLine(marginLeft, y, marginLeft + plotAreaWidth, y);
+    for (int i = 0; i <= GRID_COUNT_Y; ++i) {
+        int y = MARGIN_TOP + i * plotAreaHeight / GRID_COUNT_Y;
+        painter.drawLine(MARGIN_LEFT, y, MARGIN_LEFT + plotAreaWidth, y);
     }
 
     // 绘制坐标轴
     painter.setPen(QPen(Qt::black, 2));
-    painter.drawLine(marginLeft, marginTop + plotAreaHeight, marginLeft + plotAreaWidth, marginTop + plotAreaHeight);  // X轴
-    painter.drawLine(marginLeft, marginTop, marginLeft, marginTop + plotAreaHeight);  // Y轴
+    painter.drawLine(MARGIN_LEFT, MARGIN_TOP + plotAreaHeight, MARGIN_LEFT + plotAreaWidth, MARGIN_TOP + plotAreaHeight);  // X轴
+    painter.drawLine(MARGIN_LEFT, MARGIN_TOP, MARGIN_LEFT, MARGIN_TOP + plotAreaHeight);  // Y轴
 
     // 绘制刻度标签
     painter.setPen(Qt::black);
@@ -1847,7 +1870,7 @@ void FMFD::updateFrequencyResponsePlot()
 
     // X轴标签 (频率)
     for (int i = 0; i <= 5; ++i) {
-        int x = marginLeft + i * plotAreaWidth / 5;
+        int x = MARGIN_LEFT + i * plotAreaWidth / 5;
         double freq = minFreq + i * freqRange / 5;
         QString label;
         if (freq >= 1e9) {
@@ -1862,16 +1885,16 @@ void FMFD::updateFrequencyResponsePlot()
         else {
             label = QString::number(freq, 'f', 0) + " Hz";
         }
-        QRect textRect(x - 40, marginTop + plotAreaHeight + 5, 80, 20);
+        QRect textRect(x - 40, MARGIN_TOP + plotAreaHeight + 5, 80, 20);
         painter.drawText(textRect, Qt::AlignCenter, label);
     }
 
     // Y轴标签 (幅度)
     for (int i = 0; i <= 4; ++i) {
-        int y = marginTop + plotAreaHeight - i * plotAreaHeight / 4;
+        int y = MARGIN_TOP + plotAreaHeight - i * plotAreaHeight / 4;
         double amp = minAmp + i * ampRange / 4;
         QString label = QString::number(amp, 'f', 1) + " dBm";
-        QRect textRect(5, y - 10, marginLeft - 10, 20);
+        QRect textRect(5, y - 10, MARGIN_LEFT - 10, 20);
         painter.drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, label);
     }
 
@@ -1885,7 +1908,7 @@ void FMFD::updateFrequencyResponsePlot()
     // X轴标题
     labelFont.setBold(false);
     painter.setFont(labelFont);
-    painter.drawText(QRect(marginLeft, fixedHeight - 15, plotAreaWidth, 15), Qt::AlignCenter, tr("频率"));
+    painter.drawText(QRect(MARGIN_LEFT, fixedHeight - 15, plotAreaWidth, 15), Qt::AlignCenter, tr("频率"));
 
     // 绘制频响曲线
     if (m_frequencyResponseData.size() > 1) {
@@ -1893,20 +1916,20 @@ void FMFD::updateFrequencyResponsePlot()
         
         QPolygonF curve;
         for (const auto& point : m_frequencyResponseData) {
-            double x = marginLeft + (point.first - minFreq) / freqRange * plotAreaWidth;
-            double y = marginTop + plotAreaHeight - (point.second - minAmp) / ampRange * plotAreaHeight;
+            double x = MARGIN_LEFT + (point.first - minFreq) / freqRange * plotAreaWidth;
+            double y = MARGIN_TOP + plotAreaHeight - (point.second - minAmp) / ampRange * plotAreaHeight;
             curve << QPointF(x, y);
         }
         
         painter.drawPolyline(curve);
         
         // 绘制数据点标记（如果数据点不太多）
-        if (m_frequencyResponseData.size() <= 100) {
+        if (m_frequencyResponseData.size() <= MAX_POINTS_FOR_MARKERS) {
             painter.setPen(QPen(QColor(200, 50, 50), 1));
             painter.setBrush(QColor(200, 50, 50));
             for (const auto& point : m_frequencyResponseData) {
-                double x = marginLeft + (point.first - minFreq) / freqRange * plotAreaWidth;
-                double y = marginTop + plotAreaHeight - (point.second - minAmp) / ampRange * plotAreaHeight;
+                double x = MARGIN_LEFT + (point.first - minFreq) / freqRange * plotAreaWidth;
+                double y = MARGIN_TOP + plotAreaHeight - (point.second - minAmp) / ampRange * plotAreaHeight;
                 painter.drawEllipse(QPointF(x, y), 3, 3);
             }
         }
