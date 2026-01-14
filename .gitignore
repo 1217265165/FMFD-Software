@@ -1,0 +1,37 @@
+# CodeQL artifacts
+_codeql_detected_source_root
+
+# Build artifacts
+*.o
+*.obj
+*.exe
+*.dll
+*.lib
+*.a
+*.so
+*.dylib
+moc_*.cpp
+*.moc
+ui_*.h
+qrc_*.cpp
+
+# Qt Creator
+*.pro.user
+*.autosave
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build directories
+build/
+debug/
+release/
+x64/
+Win32/
+
+# Output directories
+Output/
