@@ -1596,8 +1596,6 @@ void FMFD::onBRBDiagnosisReadyRead()
 
 void FMFD::onBRBDiagnosisFinished(int exitCode, QProcess::ExitStatus status)
 {
-    Q_UNUSED(status);
-
     // 保存 stdout/stderr 到日志文件
     if (!m_brbRunDir.isEmpty()) {
         QString stdoutLogPath = m_brbRunDir + "/python_stdout.log";

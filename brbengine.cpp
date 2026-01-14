@@ -133,7 +133,7 @@ void BRBEngine::infer(const QMap<QString, double>& features)
 double BRBEngine::toDoubleSafe(const QJsonValue& val, double defaultVal)
 {
     if (val.isDouble()) {
-        return val.toDouble();  // No need for defaultVal when type is confirmed
+        return val.toDouble();
     }
     else if (val.isString()) {
         bool ok = false;
@@ -146,7 +146,7 @@ double BRBEngine::toDoubleSafe(const QJsonValue& val, double defaultVal)
 bool BRBEngine::toBoolSafe(const QJsonValue& val, bool defaultVal)
 {
     if (val.isBool()) {
-        return val.toBool();  // No need for defaultVal when type is confirmed
+        return val.toBool();
     }
     else if (val.isString()) {
         QString s = val.toString().toLower();
