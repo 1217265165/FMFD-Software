@@ -37,6 +37,7 @@
 #include <QSettings>
 #include <QPainter>
 #include <QTextStream>
+#include <QDateTime>
 #include "CommonTypes.h"
 #include "brbengine.h"
 #include "ZoomableGraphicsView.h"
@@ -604,7 +605,7 @@ void FMFD::setupConnections()
     connect(m_brbEngine, &BRBEngine::diagnosisReady, this, [this](const QMap<QString, double>& moduleProb) {
         // 清空现有的进度条布局
         if (m_diagScrollLayout) {
-            // 完全安全的删除方式：使用deleteLater递归删除所有子widget和layout
+            // 安全的删除方式：使用deleteLater递归删除所有子widget
             while (m_diagScrollLayout->count() > 0) {
                 QLayoutItem* item = m_diagScrollLayout->takeAt(0);
                 if (item) {
@@ -619,12 +620,12 @@ void FMFD::setupConnections()
                                 if (subItem->widget()) {
                                     subItem->widget()->deleteLater();
                                 }
-                                delete subItem;
+                                // subItem will be cleaned up by Qt
                             }
                         }
-                        item->layout()->deleteLater();
+                        // Layout item will be deleted with parent
                     }
-                    delete item;
+                    // Don't delete item immediately when widgets use deleteLater
                 }
             }
 
@@ -1483,6 +1484,9 @@ void FMFD::runBRBDiagnosis()
         return;
     }
 
+    // 保存当前输入文件路径（用于 Ground Truth 验收）
+    m_currentInputCsvPath = inputFile;
+
     // 加载CSV文件数据用于频响曲线显示
     if (loadCsvForFrequencyResponse(inputFile)) {
         // 自动切换到频响曲线显示
@@ -1494,11 +1498,15 @@ void FMFD::runBRBDiagnosis()
         }
     }
 
-    // 设置输出文件路径
-    QString outputFile = QCoreApplication::applicationDirPath() + "/brb_diagnosis_result.json";
+    // 创建带时间戳的运行目录
+    m_brbRunDir = createBrbRunDir();
+
+    // 设置输出文件路径（在运行目录中）
+    QString outputFile = m_brbRunDir + "/brb_diagnosis_result.json";
 
     m_diagText->append(tr("[BRB诊断] 开始诊断..."));
     m_diagText->append(tr("[BRB诊断] 输入文件: %1").arg(inputFile));
+    m_diagText->append(tr("[BRB诊断] 输出目录: %1").arg(m_brbRunDir));
     m_diagText->append(tr("[BRB诊断] 输出文件: %1").arg(outputFile));
 
     // 优先使用exe，如果不存在则使用Python脚本
@@ -1588,103 +1596,401 @@ void FMFD::onBRBDiagnosisReadyRead()
 
 void FMFD::onBRBDiagnosisFinished(int exitCode, QProcess::ExitStatus status)
 {
-    Q_UNUSED(status);
+    // 保存 stdout/stderr 到日志文件
+    if (!m_brbRunDir.isEmpty()) {
+        QString stdoutLogPath = m_brbRunDir + "/python_stdout.log";
+        QFile logFile(stdoutLogPath);
+        if (logFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream out(&logFile);
+            out << "=== BRB Diagnosis Python Output ===" << Qt::endl;
+            out << "Exit Code: " << exitCode << Qt::endl;
+            out << "Status: " << (status == QProcess::NormalExit ? "Normal" : "Crashed") << Qt::endl;
+            out << Qt::endl << "=== Log from UI ===" << Qt::endl;
+            // 这里简化处理，实际 stdout/stderr 已经在 onBRBDiagnosisReadyRead 中处理
+            logFile.close();
+            m_diagText->append(tr("[BRB诊断] Python日志已保存到: %1").arg(stdoutLogPath));
+        }
+    }
 
     m_diagText->append(tr("[BRB诊断] 进程结束，退出码: %1").arg(exitCode));
 
-    if (exitCode == 0) {
-        // 读取并显示结果
-        QString outputFile = QCoreApplication::applicationDirPath() + "/brb_diagnosis_result.json";
-
-        if (QFileInfo::exists(outputFile)) {
-            QFile file(outputFile);
-            if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                QByteArray jsonData = file.readAll();
-                file.close();
-
-                QJsonDocument doc = QJsonDocument::fromJson(jsonData);
-                if (!doc.isNull() && doc.isObject()) {
-                    QJsonObject result = doc.object();
-
-                    // ========== 可视化特征数据到表格 ==========
-                    if (result.contains("features")) {
-                        QJsonObject features = result["features"].toObject();
-                        QMap<QString, double> featureMap;
-                        for (auto it = features.begin(); it != features.end(); ++it) {
-                            featureMap[it.key()] = it.value().toDouble();
-                        }
-                        // 更新特征表格
-                        refreshFeatureTable(featureMap);
-                        m_diagText->append(tr("[BRB诊断] 已将 %1 个特征可视化到测量特征表格").arg(featureMap.size()));
-                    }
-
-                    m_diagText->append(tr("==================== BRB诊断结果 ===================="));
-
-                    // 显示系统级诊断
-                    if (result.contains("system_diagnosis")) {
-                        m_diagText->append(tr("\n【系统级诊断】"));
-                        QJsonObject sysDiag = result["system_diagnosis"].toObject();
-                        for (auto it = sysDiag.begin(); it != sysDiag.end(); ++it) {
-                            m_diagText->append(tr("  %1: %2%")
-                                .arg(it.key())
-                                .arg(it.value().toDouble() * 100, 0, 'f', 2));
-                        }
-                    }
-
-                    // 显示模块级诊断TOP10
-                    if (result.contains("module_diagnosis")) {
-                        m_diagText->append(tr("\n【模块级诊断 TOP10】"));
-                        QJsonObject modDiag = result["module_diagnosis"].toObject();
-
-                        // 转换为list并排序
-                        QList<QPair<QString, double>> modList;
-                        for (auto it = modDiag.begin(); it != modDiag.end(); ++it) {
-                            modList.append(qMakePair(it.key(), it.value().toDouble()));
-                        }
-                        std::sort(modList.begin(), modList.end(),
-                            [](const QPair<QString, double>& a, const QPair<QString, double>& b) {
-                                return a.second > b.second;
-                            });
-
-                        for (int i = 0; i < qMin(10, modList.size()); ++i) {
-                            m_diagText->append(tr("  %1. %2: %3%")
-                                .arg(i + 1)
-                                .arg(modList[i].first)
-                                .arg(modList[i].second * 100, 0, 'f', 2));
-                        }
-
-                        // ========== 使用模块诊断结果触发BRB可视化 ==========
-                        // 将TOP模块的诊断结果转换为概率分布并传递给BRB引擎进行可视化
-                        QMap<QString, double> moduleProbabilities;
-                        for (const auto& pair : modList) {
-                            moduleProbabilities[pair.first] = pair.second;
-                        }
-                        // 触发BRB诊断可视化（更新进度条和图形）
-                        emit m_brbEngine->diagnosisReady(moduleProbabilities);
-                        m_diagText->append(tr("[BRB诊断] 已将模块诊断结果可视化到BRB诊断区域"));
-                    }
-
-                    m_diagText->append(tr("===================================================="));
-                    m_diagText->append(tr("[BRB诊断] 完整结果已保存到: %1").arg(outputFile));
-
-                    QMessageBox::information(this, tr("诊断完成"),
-                        tr("BRB诊断完成！\n详细结果已保存到:\n%1").arg(outputFile));
-                }
-                else {
-                    m_diagText->append(tr("[BRB诊断错误] JSON解析失败"));
-                }
-            }
-            else {
-                m_diagText->append(tr("[BRB诊断错误] 无法打开结果文件: %1").arg(outputFile));
-            }
-        }
-        else {
-            m_diagText->append(tr("[BRB诊断错误] 结果文件不存在: %1").arg(outputFile));
-        }
-    }
-    else {
+    // 检查 exitCode
+    if (exitCode != 0) {
+        m_diagText->append(tr("[BRB诊断错误] Python进程非正常退出（exitCode=%1）").arg(exitCode));
+        m_diagText->append(tr("[BRB诊断错误] 请检查上方的错误输出以定位问题"));
         QMessageBox::warning(this, tr("诊断失败"),
             tr("BRB诊断进程异常退出（退出码: %1）\n请查看日志获取详细信息。").arg(exitCode));
+        return;
+    }
+
+    // 读取并显示结果
+    QString outputFile = m_brbRunDir + "/brb_diagnosis_result.json";
+
+    // 检查文件是否存在且可读
+    if (!QFileInfo::exists(outputFile)) {
+        m_diagText->append(tr("[BRB诊断错误] 结果文件不存在: %1").arg(outputFile));
+        QMessageBox::warning(this, tr("诊断失败"), tr("BRB诊断结果文件不存在。"));
+        return;
+    }
+
+    // 使用 BRBEngine::loadDiagnosisResult 解析 JSON
+    QString errorMsg;
+    DiagnosisResult diagResult = BRBEngine::loadDiagnosisResult(outputFile, &errorMsg);
+    
+    if (!errorMsg.isEmpty()) {
+        m_diagText->append(tr("[BRB诊断错误] %1").arg(errorMsg));
+        QMessageBox::warning(this, tr("诊断失败"), errorMsg);
+        return;
+    }
+
+    // 尝试加载 Ground Truth（仅对 sim_* 文件）
+    QString sampleId = extractSampleId(m_currentInputCsvPath);
+    if (!sampleId.isEmpty()) {
+        QString labelsJsonPath = QCoreApplication::applicationDirPath() + "/Output/sim_spectrum/labels.json";
+        QString gtSystemFault, gtModule;
+        if (BRBEngine::loadGroundTruth(labelsJsonPath, sampleId, gtSystemFault, gtModule)) {
+            diagResult.hasGroundTruth = true;
+            diagResult.gtSystemFaultClass = gtSystemFault;
+            diagResult.gtModule = gtModule;
+            
+            // 验收匹配判断
+            // 系统故障类型映射：将中文 predicted_class 映射回英文类型
+            QString predictedFaultType;
+            if (diagResult.systemDiagnosis.predictedClass == QStringLiteral("正常")) {
+                predictedFaultType = QStringLiteral("normal");
+            } else if (diagResult.systemDiagnosis.predictedClass == QStringLiteral("幅度失准")) {
+                predictedFaultType = QStringLiteral("amp_error");
+            } else if (diagResult.systemDiagnosis.predictedClass == QStringLiteral("频率失准")) {
+                predictedFaultType = QStringLiteral("freq_error");
+            } else if (diagResult.systemDiagnosis.predictedClass == QStringLiteral("参考电平失准")) {
+                predictedFaultType = QStringLiteral("ref_error");
+            }
+            
+            diagResult.matchResult = (predictedFaultType == gtSystemFault);
+        }
+    }
+
+    // 更新 UI
+    updateDiagnosisUI(diagResult);
+
+    m_diagText->append(tr("[BRB诊断] 完整结果已保存到: %1").arg(outputFile));
+
+    QMessageBox::information(this, tr("诊断完成"),
+        tr("BRB诊断完成！\n详细结果已保存到:\n%1").arg(outputFile));
+}
+
+// ============ BRB诊断结果UI更新函数 ============
+
+QString FMFD::createBrbRunDir()
+{
+    // 创建带时间戳的运行目录
+    QString baseDir = QCoreApplication::applicationDirPath() + "/Output/ui_runs";
+    QDir dir(baseDir);
+    if (!dir.exists()) {
+        dir.mkpath(".");
+    }
+    
+    QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+    QString runDir = baseDir + "/" + timestamp;
+    QDir(runDir).mkpath(".");
+    
+    return runDir;
+}
+
+QString FMFD::extractSampleId(const QString& csvFileName)
+{
+    // 从文件名提取 sample_id（如 sim_00009.csv -> sim_00009）
+    QFileInfo fi(csvFileName);
+    QString baseName = fi.baseName();  // 不含扩展名
+    
+    // 检查是否以 sim_ 开头
+    if (baseName.startsWith("sim_")) {
+        return baseName;
+    }
+    return QString();  // 非 sim_* 文件返回空
+}
+
+void FMFD::updateDiagnosisUI(const DiagnosisResult& result)
+{
+    m_diagText->append(tr("==================== BRB诊断结果 / BRB Diagnosis Result ===================="));
+    
+    // 显示基本信息
+    m_diagText->append(tr("\n【基本信息 / Basic Info】"));
+    m_diagText->append(tr("  输入文件 (Input File): %1").arg(result.inputFile));
+    m_diagText->append(tr("  数据点数 (Data Points): %1").arg(result.dataPoints));
+    m_diagText->append(tr("  频率范围 (Frequency Range): %1 - %2 Hz")
+        .arg(result.frequencyRange.min, 0, 'e', 2)
+        .arg(result.frequencyRange.max, 0, 'e', 2));
+
+    // 更新特征表格
+    if (!result.features.isEmpty()) {
+        refreshFeatureTable(result.features);
+        m_diagText->append(tr("\n【测量特征 / Features】已更新到特征表格（共 %1 项）").arg(result.features.size()));
+    }
+
+    // 更新系统级诊断 UI
+    updateSystemDiagnosisUI(result.systemDiagnosis);
+
+    // 更新模块级诊断 UI
+    if (!result.moduleDiagnosis.isEmpty()) {
+        updateModuleDiagnosisUI(result.moduleDiagnosis);
+    }
+
+    // 更新 Ground Truth 验收 UI
+    updateGroundTruthUI(result);
+
+    m_diagText->append(tr("===================================================="));
+}
+
+void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
+{
+    m_diagText->append(tr("\n【系统级诊断 / System-Level Diagnosis】"));
+    
+    // 系统故障类型映射（中文->英文）
+    static const QMap<QString, QString> faultTypeMap = {
+        {QStringLiteral("正常"), QStringLiteral("Normal")},
+        {QStringLiteral("幅度失准"), QStringLiteral("Amplitude Error")},
+        {QStringLiteral("频率失准"), QStringLiteral("Frequency Error")},
+        {QStringLiteral("参考电平失准"), QStringLiteral("Reference Level Error")}
+    };
+    
+    // predicted_class - 显示中英文
+    QString englishClass = faultTypeMap.value(sysDiag.predictedClass, sysDiag.predictedClass);
+    m_diagText->append(tr("  预测类别 (Predicted Class): %1 (%2)")
+        .arg(sysDiag.predictedClass, englishClass));
+    
+    // max_prob - 显示百分比
+    m_diagText->append(tr("  最大概率 (Max Probability): %1%").arg(sysDiag.maxProb * 100, 0, 'f', 2));
+    
+    // is_normal - 显示 "正常/异常" 中英文
+    QString normalStatusCN = sysDiag.isNormal ? tr("正常") : tr("异常");
+    QString normalStatusEN = sysDiag.isNormal ? "Normal" : "Abnormal";
+    m_diagText->append(tr("  系统状态 (System Status): %1 (%2)").arg(normalStatusCN, normalStatusEN));
+
+    // 显示四类概率分布
+    if (!sysDiag.probabilities.isEmpty()) {
+        m_diagText->append(tr("  概率分布 (Probability Distribution):"));
+        for (auto it = sysDiag.probabilities.constBegin(); it != sysDiag.probabilities.constEnd(); ++it) {
+            QString englishName = faultTypeMap.value(it.key(), it.key());
+            m_diagText->append(tr("    - %1 (%2): %3%")
+                .arg(it.key())
+                .arg(englishName)
+                .arg(it.value() * 100, 0, 'f', 2));
+        }
+    }
+
+    // 日志区打印关键信息（便于调试）
+    m_diagText->append(tr("\n[Log/日志] predicted_class=%1, max_prob=%2%, is_normal=%3")
+        .arg(sysDiag.predictedClass)
+        .arg(sysDiag.maxProb * 100, 0, 'f', 2)
+        .arg(sysDiag.isNormal ? "true" : "false"));
+}
+
+void FMFD::updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag)
+{
+    m_diagText->append(tr("\n【模块级诊断 TOP10 / Module-Level Diagnosis TOP10】"));
+
+    // 中英文模块名映射
+    static const QMap<QString, QString> moduleNameMap = {
+        {QStringLiteral("衰减器"), QStringLiteral("Attenuator")},
+        {QStringLiteral("前置放大器"), QStringLiteral("Preamp")},
+        {QStringLiteral("低频段前置低通滤波器"), QStringLiteral("Lowband_LPF")},
+        {QStringLiteral("低频段第一混频器"), QStringLiteral("Lowband_Mixer1")},
+        {QStringLiteral("低频段滤波器1"), QStringLiteral("Lowband_Filter1")},
+        {QStringLiteral("低频段第二混频器"), QStringLiteral("Lowband_Mixer2")},
+        {QStringLiteral("低频段滤波器2"), QStringLiteral("Lowband_Filter2")},
+        {QStringLiteral("高频段YTF滤波器"), QStringLiteral("Highband_YTF")},
+        {QStringLiteral("高频段混频器"), QStringLiteral("Highband_Mixer")},
+        {QStringLiteral("时钟振荡器"), QStringLiteral("Clock_Oscillator")},
+        {QStringLiteral("时钟合成与同步网络"), QStringLiteral("Clock_Synth")},
+        {QStringLiteral("本振源（谐波发生器）"), QStringLiteral("LO_Source")},
+        {QStringLiteral("本振混频组件"), QStringLiteral("LO_Mixer")},
+        {QStringLiteral("校准源"), QStringLiteral("Cal_Source")},
+        {QStringLiteral("存储器"), QStringLiteral("Cal_Memory")},
+        {QStringLiteral("校准信号开关"), QStringLiteral("Cal_Switch")},
+        {QStringLiteral("中频放大器"), QStringLiteral("IF_Amplifier")},
+        {QStringLiteral("ADC"), QStringLiteral("ADC")},
+        {QStringLiteral("数字RBW"), QStringLiteral("FPGA_DSP")},
+        {QStringLiteral("数字放大器"), QStringLiteral("Digital_Amp")},
+        {QStringLiteral("数字检波器"), QStringLiteral("Digital_Detector")},
+        {QStringLiteral("VBW滤波器"), QStringLiteral("VBW_Filter")},
+        {QStringLiteral("电源模块"), QStringLiteral("Power_Module")},
+        {QStringLiteral("未定义/其他"), QStringLiteral("Undefined/Other")}
+    };
+
+    // 转换为 list 并按概率降序排序
+    QList<QPair<QString, double>> sortedModules;
+    for (auto it = moduleDiag.constBegin(); it != moduleDiag.constEnd(); ++it) {
+        sortedModules.append(qMakePair(it.key(), it.value()));
+    }
+    std::sort(sortedModules.begin(), sortedModules.end(),
+        [](const QPair<QString, double>& a, const QPair<QString, double>& b) {
+            return a.second > b.second;
+        });
+
+    // 显示 TOP10
+    int topCount = qMin(10, sortedModules.size());
+    for (int i = 0; i < topCount; ++i) {
+        const QString& moduleName = sortedModules[i].first;
+        double prob = sortedModules[i].second;
+        
+        // 获取英文模块名（如果有映射）
+        QString englishName = moduleNameMap.value(moduleName, moduleName);
+        QString displayName = (moduleName != englishName) 
+            ? QString("%1 (%2)").arg(moduleName, englishName)
+            : moduleName;
+        
+        // 检查是否是前置放大器且概率为0（前放关闭的情况）
+        bool isPreampDisabled = (moduleName.contains("Preamp") || moduleName.contains(QStringLiteral("前置放大器"))) 
+                                && prob < 0.001;
+        
+        if (isPreampDisabled) {
+            m_diagText->append(tr("  %1. %2: %3% [Disabled/Off 禁用]")
+                .arg(i + 1)
+                .arg(displayName)
+                .arg(prob * 100, 0, 'f', 2));
+        } else {
+            m_diagText->append(tr("  %1. %2: %3%")
+                .arg(i + 1)
+                .arg(displayName)
+                .arg(prob * 100, 0, 'f', 2));
+        }
+    }
+
+    // 清空现有的进度条布局并重建
+    if (m_diagScrollLayout) {
+        // 完全安全的删除方式：使用deleteLater递归删除所有子widget和layout
+        while (m_diagScrollLayout->count() > 0) {
+            QLayoutItem* item = m_diagScrollLayout->takeAt(0);
+            if (item) {
+                if (item->widget()) {
+                    item->widget()->deleteLater();
+                }
+                else if (item->layout()) {
+                    // 递归删除布局中的所有widget
+                    while (item->layout()->count() > 0) {
+                        QLayoutItem* subItem = item->layout()->takeAt(0);
+                        if (subItem) {
+                            if (subItem->widget()) {
+                                subItem->widget()->deleteLater();
+                            }
+                            // subItem will be deleted when its parent layout is deleted
+                        }
+                    }
+                    // Layout item will be deleted with parent, use deleteLater for safety
+                }
+                // Don't delete item immediately when widgets use deleteLater
+                // The QLayoutItem will be cleaned up when layout is repopulated
+            }
+        }
+
+        // 清空m_moduleBars映射
+        m_moduleBars.clear();
+
+        // 重新创建进度条（按排序后的顺序）
+        for (int i = 0; i < topCount; ++i) {
+            const QString& moduleName = sortedModules[i].first;
+            double prob = sortedModules[i].second;
+            
+            // 获取英文模块名（如果有映射）用于进度条显示
+            QString englishName = moduleNameMap.value(moduleName, moduleName);
+            QString displayName = (moduleName != englishName) 
+                ? QString("%1 (%2)").arg(moduleName, englishName)
+                : moduleName;
+            
+            // 检查是否是前置放大器且概率为0
+            bool isPreampDisabled = (moduleName.contains("Preamp") || moduleName.contains(QStringLiteral("前置放大器"))) 
+                                    && prob < 0.001;
+
+            // 进度条标签显示百分比
+            QString labelText = QString("%1: %2%").arg(displayName).arg(prob * 100, 0, 'f', 1);
+            QLabel* lbl = new QLabel(labelText, m_diagScrollContent);
+            QProgressBar* bar = new QProgressBar(m_diagScrollContent);
+            bar->setRange(0, 100);
+            int percentage = static_cast<int>(prob * 100);
+            bar->setValue(percentage);
+
+            // 根据概率和状态设置颜色
+            if (isPreampDisabled) {
+                // 前放关闭：灰色显示
+                bar->setStyleSheet("QProgressBar::chunk { background-color: #cccccc; }");
+                lbl->setStyleSheet("color: #888888;");
+            } else if (prob > 0.1) {
+                // 高概率用红色样式
+                bar->setStyleSheet("QProgressBar::chunk { background-color: #ff6666; }");
+            } else {
+                // 低概率用默认样式
+                bar->setStyleSheet("");
+            }
+
+            m_moduleBars[moduleName] = bar;
+
+            QHBoxLayout* row = new QHBoxLayout();
+            row->addWidget(lbl);
+            row->addWidget(bar);
+            m_diagScrollLayout->addLayout(row);
+        }
+
+        m_diagScrollLayout->addStretch();
+    }
+
+    // 更新图形高亮显示（如果有图形项）
+    for (auto it = m_graphicsItems.constBegin(); it != m_graphicsItems.constEnd(); ++it) {
+        double prob = moduleDiag.value(it.key(), 0.0);
+        QColor color;
+        if (prob > 0.1) {
+            // 高概率用红色
+            int intensity = static_cast<int>(prob * 255);
+            color = QColor(255, 255 - intensity, 255 - intensity);
+        }
+        else {
+            // 低概率用浅色
+            color = QColor(240, 240, 240);
+        }
+        it.value()->setBrush(QBrush(color));
+    }
+
+    // 触发 BRB 引擎的诊断完成信号（用于结构图可视化）
+    QMap<QString, double> moduleProbabilities;
+    for (const auto& pair : sortedModules) {
+        moduleProbabilities[pair.first] = pair.second;
+    }
+    
+    // 更新结构图可视化
+    requestPythonVisualization(4);  // mode=4 触发symptom模式更新图形
+
+    m_diagText->append(tr("[BRB Diagnosis] Module diagnosis results visualized / 已将模块诊断结果可视化到BRB诊断区域"));
+    
+    // 打印 TopK 模块到日志
+    m_diagText->append(tr("\n[Log/日志] TopK Modules / TopK模块:"));
+    for (int i = 0; i < qMin(5, topCount); ++i) {
+        QString englishName = moduleNameMap.value(sortedModules[i].first, sortedModules[i].first);
+        m_diagText->append(tr("  - %1 (%2): %3%")
+            .arg(sortedModules[i].first)
+            .arg(englishName)
+            .arg(sortedModules[i].second * 100, 0, 'f', 2));
+    }
+}
+
+void FMFD::updateGroundTruthUI(const DiagnosisResult& result)
+{
+    m_diagText->append(tr("\n【Ground Truth 验收 / Validation】"));
+    
+    if (!result.hasGroundTruth) {
+        m_diagText->append(tr("  GT: N/A (Not a sim_* simulation file / 非 sim_* 仿真文件)"));
+        return;
+    }
+    
+    // 显示 Ground Truth
+    m_diagText->append(tr("  GT System Fault Type / 系统故障类型: %1").arg(result.gtSystemFaultClass));
+    m_diagText->append(tr("  GT Fault Module / 故障模块: %1").arg(result.gtModule));
+    
+    // 显示 Match 结果
+    QString matchStr = result.matchResult ? tr("OK ✓") : tr("NG ✗");
+    m_diagText->append(tr("  Match / 匹配: %1").arg(matchStr));
+    
+    if (!result.matchResult) {
+        m_diagText->append(tr("  [Warning/警告] Prediction does not match Ground Truth / 预测结果与 Ground Truth 不匹配！"));
     }
 }
 

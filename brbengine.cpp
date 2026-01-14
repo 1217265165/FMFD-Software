@@ -1,36 +1,41 @@
 #include "brbengine.h"
 #include <QtMath>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QDebug>
 
 BRBEngine::BRBEngine(QObject* parent)
     : QObject(parent)
 {
-    // Ê¹ÓÃÄãÌá¹©µÄ¸üÍêÕûÄ£¿éÁĞ±í
+    // ä½¿ç”¨æä¾›çš„é«˜çº§æ¨¡å—åˆ—è¡¨
     m_modules = QStringList({
-        // RF °å×ÓÄ£¿é£¨Ï¸·Ö£©
+        // RF é“¾è·¯æ¨¡å—ï¼ˆç»†åˆ†ï¼‰
         "Attenuator", "Preamp", "Lowband_LPF", "Lowband_Mixer1", "Lowband_Filter1", "Lowband_Mixer2", "Lowband_Filter2",
         "Highband_YTF", "Highband_Mixer",
-        // Ê±ÖÓÏµÍ³
+        // æ—¶é’Ÿç³»ç»Ÿ
         "Clock_Oscillator", "Clock_Synth",
-        // ±¾ÕñÏµÍ³
+        // æœ¬æŒ¯ç³»ç»Ÿ
         "LO_Source", "LO_Mixer",
-        // Ğ£×¼ÏµÍ³
+        // æ ¡å‡†ç³»ç»Ÿ
         "Cal_Source", "Cal_Memory", "Cal_Switch",
-        // ¿ØÖÆÓë½»»¥
+        // æ§åˆ¶ä¸äº¤äº’
         "CPU_Control", "Ext_Interface", "Display",
-        // Êı×ÖIF °å
+        // ä¸­é¢‘IF æ®µ
         "IF_Amplifier", "ADC", "FPGA_DSP",
-        // µçÔ´
+        // ç”µæº
         "Power_Module"
         });
 
-    // attributes order unchanged (Äã¿ÉÒÔ°´ĞèÒªµ÷Õû)
+    // attributes order unchanged (åç»­å¯æŒ‰éœ€æ·»åŠ )
     m_attributesOrder = QStringList({ "AmplitudeErr", "FrequencyErr", "PhaseNoise", "RefLevelOffset" });
 
-    // Ê¾Àı¹æÔò£ºÕâÀï±£ÁôÉÙÁ¿Ê¾Àı¹æÔò£¬ÕæÊµÏîÄ¿Çë°´¾­Ñé/ÑµÁ·Êı¾İĞŞ¸Ä
+    // ç¤ºä¾‹è§„åˆ™ï¼šè¿™é‡Œä¿ç•™ç¤ºä¾‹è§„åˆ™ï¼Œå…·ä½“å®éªŒå¯æŒ‰æ•°æ®/è®­ç»ƒç»“æœä¿®æ”¹
     BRBRule r1;
     r1.centers = { 2.0, 0.0, 1.0, 0.5 };
     r1.sigmas = { 1.5, 50.0, 2.0, 1.0 };
-    // belief map µ÷ÕûÎª¶ÔĞÂÄ£¿éµÄ·Ö²¼£¨Ê¾Àı£©
+    // belief map è®¾ç½®ä¸ºå„æ¨¡å—çš„åˆ†å¸ƒç¤ºä¾‹ï¼š
     r1.belief = {
         {"Attenuator", 0.6}, {"Preamp", 0.15}, {"Lowband_Filter1", 0.05},
         {"Highband_YTF", 0.05}, {"ADC", 0.05}, {"Power_Module", 0.05}
@@ -121,4 +126,193 @@ void BRBEngine::infer(const QMap<QString, double>& features)
     }
 
     emit diagnosisReady(finalProb);
+}
+
+// ============ JSONè§£æé™æ€æ–¹æ³•å®ç° ============
+
+double BRBEngine::toDoubleSafe(const QJsonValue& val, double defaultVal)
+{
+    if (val.isDouble()) {
+        return val.toDouble();
+    }
+    else if (val.isString()) {
+        bool ok = false;
+        double d = val.toString().toDouble(&ok);
+        return ok ? d : defaultVal;
+    }
+    return defaultVal;
+}
+
+bool BRBEngine::toBoolSafe(const QJsonValue& val, bool defaultVal)
+{
+    if (val.isBool()) {
+        return val.toBool();
+    }
+    else if (val.isString()) {
+        QString s = val.toString().toLower();
+        if (s == "true" || s == "1" || s == "yes") return true;
+        if (s == "false" || s == "0" || s == "no") return false;
+        return defaultVal;
+    }
+    else if (val.isDouble()) {
+        return val.toDouble() != 0.0;
+    }
+    return defaultVal;
+}
+
+QString BRBEngine::toStringSafe(const QJsonValue& val, const QString& defaultVal)
+{
+    if (val.isString()) {
+        return val.toString();
+    }
+    else if (val.isDouble()) {
+        return QString::number(val.toDouble());
+    }
+    else if (val.isBool()) {
+        return val.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+    }
+    return defaultVal;
+}
+
+int BRBEngine::toIntSafe(const QJsonValue& val, int defaultVal)
+{
+    if (val.isDouble()) {
+        return static_cast<int>(val.toDouble());
+    }
+    else if (val.isString()) {
+        bool ok = false;
+        int i = val.toString().toInt(&ok);
+        return ok ? i : defaultVal;
+    }
+    return defaultVal;
+}
+
+QMap<QString, double> BRBEngine::parseDoubleMap(const QJsonObject& obj)
+{
+    QMap<QString, double> result;
+    for (auto it = obj.begin(); it != obj.end(); ++it) {
+        result[it.key()] = toDoubleSafe(it.value(), 0.0);
+    }
+    return result;
+}
+
+DiagnosisResult BRBEngine::loadDiagnosisResult(const QString& jsonPath, QString* errorMsg)
+{
+    DiagnosisResult result;
+
+    QFile file(jsonPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (errorMsg) *errorMsg = QStringLiteral("æ— æ³•æ‰“å¼€æ–‡ä»¶: ") + jsonPath;
+        return result;
+    }
+
+    QByteArray jsonData = file.readAll();
+    file.close();
+
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(jsonData, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        if (errorMsg) *errorMsg = QStringLiteral("JSONè§£æé”™è¯¯: ") + parseError.errorString();
+        return result;
+    }
+
+    if (!doc.isObject()) {
+        if (errorMsg) *errorMsg = QStringLiteral("JSONæ ¹èŠ‚ç‚¹ä¸æ˜¯å¯¹è±¡");
+        return result;
+    }
+
+    QJsonObject root = doc.object();
+
+    // è§£æ input_file
+    result.inputFile = toStringSafe(root.value("input_file"));
+
+    // è§£æ data_points
+    result.dataPoints = toIntSafe(root.value("data_points"), 0);
+
+    // è§£æ frequency_range
+    if (root.contains("frequency_range") && root["frequency_range"].isObject()) {
+        QJsonObject freqRange = root["frequency_range"].toObject();
+        result.frequencyRange.min = toDoubleSafe(freqRange.value("min"), 0.0);
+        result.frequencyRange.max = toDoubleSafe(freqRange.value("max"), 0.0);
+    }
+
+    // è§£æ features
+    if (root.contains("features") && root["features"].isObject()) {
+        result.features = parseDoubleMap(root["features"].toObject());
+    }
+
+    // è§£æ system_diagnosis
+    if (root.contains("system_diagnosis") && root["system_diagnosis"].isObject()) {
+        QJsonObject sysDiag = root["system_diagnosis"].toObject();
+
+        // probabilities
+        if (sysDiag.contains("probabilities") && sysDiag["probabilities"].isObject()) {
+            result.systemDiagnosis.probabilities = parseDoubleMap(sysDiag["probabilities"].toObject());
+        }
+
+        // predicted_class - å­—ç¬¦ä¸²ç±»å‹
+        result.systemDiagnosis.predictedClass = toStringSafe(sysDiag.value("predicted_class"));
+
+        // max_prob - double 0~1
+        result.systemDiagnosis.maxProb = toDoubleSafe(sysDiag.value("max_prob"), 0.0);
+
+        // is_normal - bool
+        result.systemDiagnosis.isNormal = toBoolSafe(sysDiag.value("is_normal"), false);
+    }
+
+    // è§£æ module_diagnosisï¼ˆåµŒå¥—ç»“æ„ï¼šåŒ…å« probabilities, topk, disabled_modulesï¼‰
+    if (root.contains("module_diagnosis") && root["module_diagnosis"].isObject()) {
+        QJsonObject modDiagObj = root["module_diagnosis"].toObject();
+        
+        // ä¼˜å…ˆä» probabilities å­å¯¹è±¡è§£æ
+        if (modDiagObj.contains("probabilities") && modDiagObj["probabilities"].isObject()) {
+            result.moduleDiagnosis = parseDoubleMap(modDiagObj["probabilities"].toObject());
+        } else {
+            // å…¼å®¹æ—§æ ¼å¼ï¼šç›´æ¥æ˜¯ object<string, double>
+            result.moduleDiagnosis = parseDoubleMap(modDiagObj);
+        }
+    }
+
+    // è§£æ evidence (å¯é€‰å­—æ®µ)
+    if (root.contains("evidence") && root["evidence"].isObject()) {
+        QJsonObject evidenceObj = root["evidence"].toObject();
+        for (auto it = evidenceObj.begin(); it != evidenceObj.end(); ++it) {
+            result.evidence[it.key()] = it.value().toVariant();
+        }
+    }
+
+    return result;
+}
+
+bool BRBEngine::loadGroundTruth(const QString& labelsJsonPath, const QString& sampleId,
+                                 QString& gtSystemFault, QString& gtModule)
+{
+    QFile file(labelsJsonPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return false;
+    }
+
+    QByteArray jsonData = file.readAll();
+    file.close();
+
+    QJsonDocument doc = QJsonDocument::fromJson(jsonData);
+    if (!doc.isObject()) {
+        return false;
+    }
+
+    QJsonObject root = doc.object();
+    if (!root.contains(sampleId)) {
+        return false;
+    }
+
+    QJsonValue sampleVal = root.value(sampleId);
+    if (!sampleVal.isObject()) {
+        return false;
+    }
+
+    QJsonObject sampleObj = sampleVal.toObject();
+    gtSystemFault = toStringSafe(sampleObj.value("system_fault_class"));
+    gtModule = toStringSafe(sampleObj.value("module"));
+
+    return true;
 }

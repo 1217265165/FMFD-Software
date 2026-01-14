@@ -117,6 +117,17 @@ private:
     QWidget* m_diagScrollContent = nullptr;  // 用于动态重建进度条列表
     QVBoxLayout* m_diagScrollLayout = nullptr;  // 用于动态重建进度条列表
 
+    // ============ 系统级诊断UI控件 ============
+    QLabel* m_predictedClassLabel = nullptr;      // 预测类别（中文字符串）
+    QLabel* m_maxProbLabel = nullptr;             // 最大概率（百分比）
+    QLabel* m_isNormalLabel = nullptr;            // 是否正常（正常/异常）
+    QMap<QString, QProgressBar*> m_systemProbBars;// 系统四类概率进度条
+
+    // ============ Ground Truth验收UI控件 ============
+    QLabel* m_gtSystemFaultLabel = nullptr;       // GT系统故障类型
+    QLabel* m_gtModuleLabel = nullptr;            // GT模块名
+    QLabel* m_matchResultLabel = nullptr;         // Match: OK/NG
+
     // ============ 业务逻辑类 ============
     AutoTestModule* m_autoTest = nullptr;
     BRBEngine* m_brbEngine = nullptr;
@@ -139,6 +150,8 @@ private:
     QString m_brbPythonPath = QStringLiteral("python");  // Python解释器路径，可配置
     QString m_brbScriptPath;  // Python脚本路径，通过配置对话框设置
     QString m_brbExePath;     // 打包后的exe路径，通过配置对话框设置或使用默认路径
+    QString m_brbRunDir;      // BRB诊断运行目录（每次运行生成带时间戳的子目录）
+    QString m_currentInputCsvPath;  // 当前输入的CSV文件路径
 
     // ============ 图像显示 ============
     QLabel* m_instrImage = nullptr;
@@ -241,6 +254,14 @@ private:
     // ============ 自动化测试方法 ============
     void startAutomatedTest(const QStringList& frequencies, double powerDbm, double rbw,
         double span, const QString& vbwMode, int repeats);
+
+    // ============ BRB诊断结果UI更新 ============
+    void updateDiagnosisUI(const DiagnosisResult& result);
+    void updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag);
+    void updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag);
+    void updateGroundTruthUI(const DiagnosisResult& result);
+    QString createBrbRunDir();  // 创建带时间戳的运行目录
+    QString extractSampleId(const QString& csvFileName);  // 从文件名提取 sample_id
 
 
 };
