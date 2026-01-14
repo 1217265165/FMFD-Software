@@ -260,9 +260,17 @@ DiagnosisResult BRBEngine::loadDiagnosisResult(const QString& jsonPath, QString*
         result.systemDiagnosis.isNormal = toBoolSafe(sysDiag.value("is_normal"), false);
     }
 
-    // 解析 module_diagnosis
+    // 解析 module_diagnosis（嵌套结构：包含 probabilities, topk, disabled_modules）
     if (root.contains("module_diagnosis") && root["module_diagnosis"].isObject()) {
-        result.moduleDiagnosis = parseDoubleMap(root["module_diagnosis"].toObject());
+        QJsonObject modDiagObj = root["module_diagnosis"].toObject();
+        
+        // 优先从 probabilities 子对象解析
+        if (modDiagObj.contains("probabilities") && modDiagObj["probabilities"].isObject()) {
+            result.moduleDiagnosis = parseDoubleMap(modDiagObj["probabilities"].toObject());
+        } else {
+            // 兼容旧格式：直接是 object<string, double>
+            result.moduleDiagnosis = parseDoubleMap(modDiagObj);
+        }
     }
 
     // 解析 evidence (可选字段)

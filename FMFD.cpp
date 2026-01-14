@@ -1712,20 +1712,20 @@ QString FMFD::extractSampleId(const QString& csvFileName)
 
 void FMFD::updateDiagnosisUI(const DiagnosisResult& result)
 {
-    m_diagText->append(tr("==================== BRB诊断结果 ===================="));
+    m_diagText->append(tr("==================== BRB诊断结果 / BRB Diagnosis Result ===================="));
     
     // 显示基本信息
-    m_diagText->append(tr("\n【基本信息】"));
-    m_diagText->append(tr("  输入文件: %1").arg(result.inputFile));
-    m_diagText->append(tr("  数据点数: %1").arg(result.dataPoints));
-    m_diagText->append(tr("  频率范围: %1 - %2 Hz")
+    m_diagText->append(tr("\n【基本信息 / Basic Info】"));
+    m_diagText->append(tr("  输入文件 (Input File): %1").arg(result.inputFile));
+    m_diagText->append(tr("  数据点数 (Data Points): %1").arg(result.dataPoints));
+    m_diagText->append(tr("  频率范围 (Frequency Range): %1 - %2 Hz")
         .arg(result.frequencyRange.min, 0, 'e', 2)
         .arg(result.frequencyRange.max, 0, 'e', 2));
 
     // 更新特征表格
     if (!result.features.isEmpty()) {
         refreshFeatureTable(result.features);
-        m_diagText->append(tr("\n【测量特征】已更新到特征表格（共 %1 项）").arg(result.features.size()));
+        m_diagText->append(tr("\n【测量特征 / Features】已更新到特征表格（共 %1 项）").arg(result.features.size()));
     }
 
     // 更新系统级诊断 UI
@@ -1744,30 +1744,43 @@ void FMFD::updateDiagnosisUI(const DiagnosisResult& result)
 
 void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
 {
-    m_diagText->append(tr("\n【系统级诊断】"));
+    m_diagText->append(tr("\n【系统级诊断 / System-Level Diagnosis】"));
     
-    // predicted_class - 显示中文字符串（不是百分比！）
-    m_diagText->append(tr("  预测类别: %1").arg(sysDiag.predictedClass));
+    // 系统故障类型映射（中文->英文）
+    static const QMap<QString, QString> faultTypeMap = {
+        {QStringLiteral("正常"), QStringLiteral("Normal")},
+        {QStringLiteral("幅度失准"), QStringLiteral("Amplitude Error")},
+        {QStringLiteral("频率失准"), QStringLiteral("Frequency Error")},
+        {QStringLiteral("参考电平失准"), QStringLiteral("Reference Level Error")}
+    };
+    
+    // predicted_class - 显示中英文
+    QString englishClass = faultTypeMap.value(sysDiag.predictedClass, sysDiag.predictedClass);
+    m_diagText->append(tr("  预测类别 (Predicted Class): %1 (%2)")
+        .arg(sysDiag.predictedClass, englishClass));
     
     // max_prob - 显示百分比
-    m_diagText->append(tr("  最大概率: %1%").arg(sysDiag.maxProb * 100, 0, 'f', 2));
+    m_diagText->append(tr("  最大概率 (Max Probability): %1%").arg(sysDiag.maxProb * 100, 0, 'f', 2));
     
-    // is_normal - 显示 "正常/异常"（不是百分比！）
-    QString normalStatus = sysDiag.isNormal ? tr("正常") : tr("异常");
-    m_diagText->append(tr("  系统状态: %1").arg(normalStatus));
+    // is_normal - 显示 "正常/异常" 中英文
+    QString normalStatusCN = sysDiag.isNormal ? tr("正常") : tr("异常");
+    QString normalStatusEN = sysDiag.isNormal ? "Normal" : "Abnormal";
+    m_diagText->append(tr("  系统状态 (System Status): %1 (%2)").arg(normalStatusCN, normalStatusEN));
 
     // 显示四类概率分布
     if (!sysDiag.probabilities.isEmpty()) {
-        m_diagText->append(tr("  概率分布:"));
+        m_diagText->append(tr("  概率分布 (Probability Distribution):"));
         for (auto it = sysDiag.probabilities.constBegin(); it != sysDiag.probabilities.constEnd(); ++it) {
-            m_diagText->append(tr("    - %1: %2%")
+            QString englishName = faultTypeMap.value(it.key(), it.key());
+            m_diagText->append(tr("    - %1 (%2): %3%")
                 .arg(it.key())
+                .arg(englishName)
                 .arg(it.value() * 100, 0, 'f', 2));
         }
     }
 
     // 日志区打印关键信息（便于调试）
-    m_diagText->append(tr("\n[日志] predicted_class=%1, max_prob=%2%, is_normal=%3")
+    m_diagText->append(tr("\n[Log/日志] predicted_class=%1, max_prob=%2%, is_normal=%3")
         .arg(sysDiag.predictedClass)
         .arg(sysDiag.maxProb * 100, 0, 'f', 2)
         .arg(sysDiag.isNormal ? "true" : "false"));
@@ -1775,7 +1788,35 @@ void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
 
 void FMFD::updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag)
 {
-    m_diagText->append(tr("\n【模块级诊断 TOP10】"));
+    m_diagText->append(tr("\n【模块级诊断 TOP10 / Module-Level Diagnosis TOP10】"));
+
+    // 中英文模块名映射
+    static const QMap<QString, QString> moduleNameMap = {
+        {QStringLiteral("衰减器"), QStringLiteral("Attenuator")},
+        {QStringLiteral("前置放大器"), QStringLiteral("Preamp")},
+        {QStringLiteral("低频段前置低通滤波器"), QStringLiteral("Lowband_LPF")},
+        {QStringLiteral("低频段第一混频器"), QStringLiteral("Lowband_Mixer1")},
+        {QStringLiteral("低频段滤波器1"), QStringLiteral("Lowband_Filter1")},
+        {QStringLiteral("低频段第二混频器"), QStringLiteral("Lowband_Mixer2")},
+        {QStringLiteral("低频段滤波器2"), QStringLiteral("Lowband_Filter2")},
+        {QStringLiteral("高频段YTF滤波器"), QStringLiteral("Highband_YTF")},
+        {QStringLiteral("高频段混频器"), QStringLiteral("Highband_Mixer")},
+        {QStringLiteral("时钟振荡器"), QStringLiteral("Clock_Oscillator")},
+        {QStringLiteral("时钟合成与同步网络"), QStringLiteral("Clock_Synth")},
+        {QStringLiteral("本振源（谐波发生器）"), QStringLiteral("LO_Source")},
+        {QStringLiteral("本振混频组件"), QStringLiteral("LO_Mixer")},
+        {QStringLiteral("校准源"), QStringLiteral("Cal_Source")},
+        {QStringLiteral("存储器"), QStringLiteral("Cal_Memory")},
+        {QStringLiteral("校准信号开关"), QStringLiteral("Cal_Switch")},
+        {QStringLiteral("中频放大器"), QStringLiteral("IF_Amplifier")},
+        {QStringLiteral("ADC"), QStringLiteral("ADC")},
+        {QStringLiteral("数字RBW"), QStringLiteral("FPGA_DSP")},
+        {QStringLiteral("数字放大器"), QStringLiteral("Digital_Amp")},
+        {QStringLiteral("数字检波器"), QStringLiteral("Digital_Detector")},
+        {QStringLiteral("VBW滤波器"), QStringLiteral("VBW_Filter")},
+        {QStringLiteral("电源模块"), QStringLiteral("Power_Module")},
+        {QStringLiteral("未定义/其他"), QStringLiteral("Undefined/Other")}
+    };
 
     // 转换为 list 并按概率降序排序
     QList<QPair<QString, double>> sortedModules;
@@ -1793,19 +1834,25 @@ void FMFD::updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag)
         const QString& moduleName = sortedModules[i].first;
         double prob = sortedModules[i].second;
         
+        // 获取英文模块名（如果有映射）
+        QString englishName = moduleNameMap.value(moduleName, moduleName);
+        QString displayName = (moduleName != englishName) 
+            ? QString("%1 (%2)").arg(moduleName, englishName)
+            : moduleName;
+        
         // 检查是否是前置放大器且概率为0（前放关闭的情况）
         bool isPreampDisabled = (moduleName.contains("Preamp") || moduleName.contains(QStringLiteral("前置放大器"))) 
                                 && prob < 0.001;
         
         if (isPreampDisabled) {
-            m_diagText->append(tr("  %1. %2: %3% [Disabled/Off]")
+            m_diagText->append(tr("  %1. %2: %3% [Disabled/Off 禁用]")
                 .arg(i + 1)
-                .arg(moduleName)
+                .arg(displayName)
                 .arg(prob * 100, 0, 'f', 2));
         } else {
             m_diagText->append(tr("  %1. %2: %3%")
                 .arg(i + 1)
-                .arg(moduleName)
+                .arg(displayName)
                 .arg(prob * 100, 0, 'f', 2));
         }
     }
@@ -1845,11 +1892,19 @@ void FMFD::updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag)
             const QString& moduleName = sortedModules[i].first;
             double prob = sortedModules[i].second;
             
+            // 获取英文模块名（如果有映射）用于进度条显示
+            QString englishName = moduleNameMap.value(moduleName, moduleName);
+            QString displayName = (moduleName != englishName) 
+                ? QString("%1 (%2)").arg(moduleName, englishName)
+                : moduleName;
+            
             // 检查是否是前置放大器且概率为0
             bool isPreampDisabled = (moduleName.contains("Preamp") || moduleName.contains(QStringLiteral("前置放大器"))) 
                                     && prob < 0.001;
 
-            QLabel* lbl = new QLabel(moduleName, m_diagScrollContent);
+            // 进度条标签显示百分比
+            QString labelText = QString("%1: %2%").arg(displayName).arg(prob * 100, 0, 'f', 1);
+            QLabel* lbl = new QLabel(labelText, m_diagScrollContent);
             QProgressBar* bar = new QProgressBar(m_diagScrollContent);
             bar->setRange(0, 100);
             int percentage = static_cast<int>(prob * 100);
@@ -1904,36 +1959,38 @@ void FMFD::updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag)
     // 更新结构图可视化
     requestPythonVisualization(4);  // mode=4 触发symptom模式更新图形
 
-    m_diagText->append(tr("[BRB诊断] 已将模块诊断结果可视化到BRB诊断区域"));
+    m_diagText->append(tr("[BRB Diagnosis] Module diagnosis results visualized / 已将模块诊断结果可视化到BRB诊断区域"));
     
     // 打印 TopK 模块到日志
-    m_diagText->append(tr("\n[日志] TopK模块:"));
+    m_diagText->append(tr("\n[Log/日志] TopK Modules / TopK模块:"));
     for (int i = 0; i < qMin(5, topCount); ++i) {
-        m_diagText->append(tr("  - %1: %2%")
+        QString englishName = moduleNameMap.value(sortedModules[i].first, sortedModules[i].first);
+        m_diagText->append(tr("  - %1 (%2): %3%")
             .arg(sortedModules[i].first)
+            .arg(englishName)
             .arg(sortedModules[i].second * 100, 0, 'f', 2));
     }
 }
 
 void FMFD::updateGroundTruthUI(const DiagnosisResult& result)
 {
-    m_diagText->append(tr("\n【Ground Truth 验收】"));
+    m_diagText->append(tr("\n【Ground Truth 验收 / Validation】"));
     
     if (!result.hasGroundTruth) {
-        m_diagText->append(tr("  GT: N/A（非 sim_* 仿真文件）"));
+        m_diagText->append(tr("  GT: N/A (Not a sim_* simulation file / 非 sim_* 仿真文件)"));
         return;
     }
     
     // 显示 Ground Truth
-    m_diagText->append(tr("  GT 系统故障类型: %1").arg(result.gtSystemFaultClass));
-    m_diagText->append(tr("  GT 故障模块: %1").arg(result.gtModule));
+    m_diagText->append(tr("  GT System Fault Type / 系统故障类型: %1").arg(result.gtSystemFaultClass));
+    m_diagText->append(tr("  GT Fault Module / 故障模块: %1").arg(result.gtModule));
     
     // 显示 Match 结果
     QString matchStr = result.matchResult ? tr("OK ✓") : tr("NG ✗");
-    m_diagText->append(tr("  Match: %1").arg(matchStr));
+    m_diagText->append(tr("  Match / 匹配: %1").arg(matchStr));
     
     if (!result.matchResult) {
-        m_diagText->append(tr("  [警告] 预测结果与 Ground Truth 不匹配！"));
+        m_diagText->append(tr("  [Warning/警告] Prediction does not match Ground Truth / 预测结果与 Ground Truth 不匹配！"));
     }
 }
 
