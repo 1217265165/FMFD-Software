@@ -605,7 +605,7 @@ void FMFD::setupConnections()
     connect(m_brbEngine, &BRBEngine::diagnosisReady, this, [this](const QMap<QString, double>& moduleProb) {
         // 清空现有的进度条布局
         if (m_diagScrollLayout) {
-            // 完全安全的删除方式：使用deleteLater递归删除所有子widget和layout
+            // 安全的删除方式：使用deleteLater递归删除所有子widget
             while (m_diagScrollLayout->count() > 0) {
                 QLayoutItem* item = m_diagScrollLayout->takeAt(0);
                 if (item) {
@@ -620,12 +620,12 @@ void FMFD::setupConnections()
                                 if (subItem->widget()) {
                                     subItem->widget()->deleteLater();
                                 }
-                                delete subItem;
+                                // subItem will be cleaned up by Qt
                             }
                         }
-                        item->layout()->deleteLater();
+                        // Layout item will be deleted with parent
                     }
-                    delete item;
+                    // Don't delete item immediately when widgets use deleteLater
                 }
             }
 
@@ -1829,12 +1829,13 @@ void FMFD::updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag)
                             if (subItem->widget()) {
                                 subItem->widget()->deleteLater();
                             }
-                            delete subItem;
+                            // subItem will be deleted when its parent layout is deleted
                         }
                     }
-                    item->layout()->deleteLater();
+                    // Layout item will be deleted with parent, use deleteLater for safety
                 }
-                delete item;
+                // Don't delete item immediately when widgets use deleteLater
+                // The QLayoutItem will be cleaned up when layout is repopulated
             }
         }
 
