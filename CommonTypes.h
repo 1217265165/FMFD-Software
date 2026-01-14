@@ -100,3 +100,38 @@ struct TestScheme {
     QString schemeName;           // 方案名称（兼容方案管理）
     QString description = "";     // 方案描述
 };
+
+// ============ BRB诊断结果相关 ============
+#include <QMap>
+#include <QVariant>
+
+// 频率范围
+struct FrequencyRange {
+    double min = 0.0;
+    double max = 0.0;
+};
+
+// 系统级诊断结果
+struct SystemDiagnosis {
+    QMap<QString, double> probabilities;  // 中文 key：'正常','幅度失准','频率失准','参考电平失准'
+    QString predictedClass;               // 中文字符串
+    double maxProb = 0.0;                 // 0~1
+    bool isNormal = false;
+};
+
+// BRB诊断完整结果
+struct DiagnosisResult {
+    QString inputFile;                    // 输入文件路径
+    int dataPoints = 0;                   // 数据点数
+    FrequencyRange frequencyRange;        // 频率范围
+    QMap<QString, double> features;       // 特征值
+    SystemDiagnosis systemDiagnosis;      // 系统级诊断
+    QMap<QString, double> moduleDiagnosis;// 模块诊断概率 (0~1)
+    QMap<QString, QVariant> evidence;     // 证据 (可选)
+    
+    // Ground Truth (仿真验收用)
+    QString gtSystemFaultClass;           // 如 amp_error/freq_error/ref_error/normal
+    QString gtModule;                     // 中文模块名
+    bool hasGroundTruth = false;          // 是否有 GT
+    bool matchResult = false;             // 验收是否通过
+};
