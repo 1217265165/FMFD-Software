@@ -692,8 +692,7 @@ void FMFD::setupConnections()
             it.value()->setBrush(QBrush(color));
         }
 
-        // 更新结构图可视化
-        requestPythonVisualization(4);  // mode=4 触发symptom模式更新图形
+        // 更新结构图可视化由系统级诊断结果驱动
         });
 
     connect(m_pyProc, &QProcess::readyReadStandardOutput, this, &FMFD::onPythonReadyRead);
@@ -1745,7 +1744,7 @@ void FMFD::updateDiagnosisUI(const DiagnosisResult& result)
 void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
 {
     m_diagText->append(tr("\n【系统级诊断 / System-Level Diagnosis】"));
-    
+
     // 系统故障类型映射（中文->英文）
     static const QMap<QString, QString> faultTypeMap = {
         {QStringLiteral("正常"), QStringLiteral("Normal")},
@@ -1768,22 +1767,51 @@ void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
     m_diagText->append(tr("  系统状态 (System Status): %1 (%2)").arg(normalStatusCN, normalStatusEN));
 
     // 显示四类概率分布
+    QString topClass = sysDiag.predictedClass.trimmed();
+    double topProb = sysDiag.maxProb;
     if (!sysDiag.probabilities.isEmpty()) {
         m_diagText->append(tr("  概率分布 (Probability Distribution):"));
+        topProb = -1.0;
         for (auto it = sysDiag.probabilities.constBegin(); it != sysDiag.probabilities.constEnd(); ++it) {
-            QString englishName = faultTypeMap.value(it.key(), it.key());
+            QString className = it.key().trimmed();
+            QString englishName = faultTypeMap.value(className, className);
             m_diagText->append(tr("    - %1 (%2): %3%")
-                .arg(it.key())
+                .arg(className)
                 .arg(englishName)
                 .arg(it.value() * 100, 0, 'f', 2));
+            if (it.value() > topProb) {
+                topProb = it.value();
+                topClass = className;
+            }
         }
     }
 
+    // 根据最高概率类别自动切换结构图
+    static const QMap<QString, int> classToVizMode = {
+        {QStringLiteral("正常"), 0},
+        {QStringLiteral("频率失准"), 1},
+        {QStringLiteral("幅度失准"), 2},
+        {QStringLiteral("参考电平失准"), 4},
+        {QStringLiteral("Normal"), 0},
+        {QStringLiteral("Frequency Error"), 1},
+        {QStringLiteral("Amplitude Error"), 2},
+        {QStringLiteral("Reference Level Error"), 4}
+    };
+    if (classToVizMode.contains(topClass)) {
+        int vizMode = classToVizMode.value(topClass);
+        m_diagText->append(tr("[Log/日志] Auto viz: class=%1 mode=%2 prob=%3%")
+            .arg(topClass)
+            .arg(vizMode)
+            .arg(topProb * 100, 0, 'f', 2));
+        requestPythonVisualization(vizMode);
+    }
+
     // 日志区打印关键信息（便于调试）
-    m_diagText->append(tr("\n[Log/日志] predicted_class=%1, max_prob=%2%, is_normal=%3")
+    m_diagText->append(tr("\n[Log/日志] predicted_class=%1, max_prob=%2%, is_normal=%3, top_class=%4")
         .arg(sysDiag.predictedClass)
         .arg(sysDiag.maxProb * 100, 0, 'f', 2)
-        .arg(sysDiag.isNormal ? "true" : "false"));
+        .arg(sysDiag.isNormal ? "true" : "false")
+        .arg(topClass));
 }
 
 void FMFD::updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag)
@@ -1956,8 +1984,7 @@ void FMFD::updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag)
         moduleProbabilities[pair.first] = pair.second;
     }
     
-    // 更新结构图可视化
-    requestPythonVisualization(4);  // mode=4 触发symptom模式更新图形
+    // 更新结构图可视化由系统级诊断结果驱动
 
     m_diagText->append(tr("[BRB Diagnosis] Module diagnosis results visualized / 已将模块诊断结果可视化到BRB诊断区域"));
     
@@ -2003,6 +2030,8 @@ namespace FreqResponsePlotConstants {
     constexpr double MIN_AMP_RANGE = 10.0;      // 最小幅度范围，防止除零
     constexpr double EPSILON = 1e-6;            // 浮点比较阈值
     constexpr double RANGE_MARGIN_RATIO = 0.1;  // 数据范围边距比例
+    constexpr double FIXED_MIN_AMP = -10.5;     // 固定Y轴下限（dBm）
+    constexpr double FIXED_MAX_AMP = -9.5;      // 固定Y轴上限（dBm）
     
     // 绘图布局边距
     constexpr int MARGIN_LEFT = 60;
@@ -2129,16 +2158,15 @@ void FMFD::updateFrequencyResponsePlot()
         maxAmp = qMax(maxAmp, point.second);
     }
 
-    // 添加边距
+    // 频率范围处理
     double freqRange = maxFreq - minFreq;
-    double ampRange = maxAmp - minAmp;
     if (freqRange < EPSILON) freqRange = MIN_FREQ_RANGE;  // 防止除零
-    if (ampRange < EPSILON) ampRange = MIN_AMP_RANGE;     // 防止除零
 
-    // 扩展范围以留出边距
-    minAmp -= ampRange * RANGE_MARGIN_RATIO;
-    maxAmp += ampRange * RANGE_MARGIN_RATIO;
-    ampRange = maxAmp - minAmp;
+    // 幅度范围固定为指定区间
+    minAmp = FIXED_MIN_AMP;
+    maxAmp = FIXED_MAX_AMP;
+    double ampRange = maxAmp - minAmp;
+    if (ampRange < EPSILON) ampRange = MIN_AMP_RANGE;  // 防止除零
 
     // 创建绘图区域
     int fixedHeight = int(this->height() * 0.4);
