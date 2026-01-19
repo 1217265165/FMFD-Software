@@ -1745,7 +1745,7 @@ void FMFD::updateDiagnosisUI(const DiagnosisResult& result)
 void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
 {
     m_diagText->append(tr("\n【系统级诊断 / System-Level Diagnosis】"));
-    
+
     // 系统故障类型映射（中文->英文）
     static const QMap<QString, QString> faultTypeMap = {
         {QStringLiteral("正常"), QStringLiteral("Normal")},
@@ -1768,15 +1768,32 @@ void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
     m_diagText->append(tr("  系统状态 (System Status): %1 (%2)").arg(normalStatusCN, normalStatusEN));
 
     // 显示四类概率分布
+    QString topClass = sysDiag.predictedClass;
     if (!sysDiag.probabilities.isEmpty()) {
         m_diagText->append(tr("  概率分布 (Probability Distribution):"));
+        double topProb = -1.0;
         for (auto it = sysDiag.probabilities.constBegin(); it != sysDiag.probabilities.constEnd(); ++it) {
             QString englishName = faultTypeMap.value(it.key(), it.key());
             m_diagText->append(tr("    - %1 (%2): %3%")
                 .arg(it.key())
                 .arg(englishName)
                 .arg(it.value() * 100, 0, 'f', 2));
+            if (it.value() > topProb) {
+                topProb = it.value();
+                topClass = it.key();
+            }
         }
+    }
+
+    // 根据最高概率类别自动切换结构图
+    static const QMap<QString, int> classToVizMode = {
+        {QStringLiteral("正常"), 0},
+        {QStringLiteral("频率失准"), 1},
+        {QStringLiteral("幅度失准"), 2},
+        {QStringLiteral("参考电平失准"), 4}
+    };
+    if (classToVizMode.contains(topClass)) {
+        requestPythonVisualization(classToVizMode.value(topClass));
     }
 
     // 日志区打印关键信息（便于调试）
@@ -2003,6 +2020,8 @@ namespace FreqResponsePlotConstants {
     constexpr double MIN_AMP_RANGE = 10.0;      // 最小幅度范围，防止除零
     constexpr double EPSILON = 1e-6;            // 浮点比较阈值
     constexpr double RANGE_MARGIN_RATIO = 0.1;  // 数据范围边距比例
+    constexpr double FIXED_MIN_AMP = -10.5;     // 固定Y轴下限（dBm）
+    constexpr double FIXED_MAX_AMP = -9.5;      // 固定Y轴上限（dBm）
     
     // 绘图布局边距
     constexpr int MARGIN_LEFT = 60;
@@ -2129,16 +2148,15 @@ void FMFD::updateFrequencyResponsePlot()
         maxAmp = qMax(maxAmp, point.second);
     }
 
-    // 添加边距
+    // 频率范围处理
     double freqRange = maxFreq - minFreq;
-    double ampRange = maxAmp - minAmp;
     if (freqRange < EPSILON) freqRange = MIN_FREQ_RANGE;  // 防止除零
-    if (ampRange < EPSILON) ampRange = MIN_AMP_RANGE;     // 防止除零
 
-    // 扩展范围以留出边距
-    minAmp -= ampRange * RANGE_MARGIN_RATIO;
-    maxAmp += ampRange * RANGE_MARGIN_RATIO;
-    ampRange = maxAmp - minAmp;
+    // 幅度范围固定为指定区间
+    minAmp = FIXED_MIN_AMP;
+    maxAmp = FIXED_MAX_AMP;
+    double ampRange = maxAmp - minAmp;
+    if (ampRange < EPSILON) ampRange = MIN_AMP_RANGE;  // 防止除零
 
     // 创建绘图区域
     int fixedHeight = int(this->height() * 0.4);
