@@ -1769,9 +1769,10 @@ void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
 
     // 显示四类概率分布
     QString topClass = sysDiag.predictedClass;
+    double topProb = sysDiag.maxProb;
     if (!sysDiag.probabilities.isEmpty()) {
         m_diagText->append(tr("  概率分布 (Probability Distribution):"));
-        double topProb = -1.0;
+        topProb = -1.0;
         for (auto it = sysDiag.probabilities.constBegin(); it != sysDiag.probabilities.constEnd(); ++it) {
             QString englishName = faultTypeMap.value(it.key(), it.key());
             m_diagText->append(tr("    - %1 (%2): %3%")
@@ -1797,10 +1798,11 @@ void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
     }
 
     // 日志区打印关键信息（便于调试）
-    m_diagText->append(tr("\n[Log/日志] predicted_class=%1, max_prob=%2%, is_normal=%3")
+    m_diagText->append(tr("\n[Log/日志] predicted_class=%1, max_prob=%2%, is_normal=%3, top_class=%4")
         .arg(sysDiag.predictedClass)
         .arg(sysDiag.maxProb * 100, 0, 'f', 2)
-        .arg(sysDiag.isNormal ? "true" : "false"));
+        .arg(sysDiag.isNormal ? "true" : "false")
+        .arg(topClass));
 }
 
 void FMFD::updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag)
