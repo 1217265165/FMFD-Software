@@ -2087,7 +2087,7 @@ void FMFD::updateFrequencyResponsePlot()
     if (m_frequencyResponseData.isEmpty()) {
         // 显示提示信息
         int fixedHeight = int(this->height() * 0.4);
-        int plotWidth = int(fixedHeight * 1.6);  // 宽高比约1.6:1
+        int plotWidth = int(fixedHeight * 2);  // 宽高比约2:1
         
         QPixmap plotPixmap(plotWidth, fixedHeight);
         plotPixmap.fill(Qt::white);
@@ -2142,7 +2142,7 @@ void FMFD::updateFrequencyResponsePlot()
 
     // 创建绘图区域
     int fixedHeight = int(this->height() * 0.4);
-    int plotWidth = int(fixedHeight * 1.6);  // 宽高比约1.6:1
+    int plotWidth = int(fixedHeight * 2);  // 宽高比约2:1
     
     QPixmap plotPixmap(plotWidth, fixedHeight);
     plotPixmap.fill(Qt::white);
