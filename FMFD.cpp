@@ -692,8 +692,7 @@ void FMFD::setupConnections()
             it.value()->setBrush(QBrush(color));
         }
 
-        // 更新结构图可视化
-        requestPythonVisualization(4);  // mode=4 触发symptom模式更新图形
+        // 更新结构图可视化由系统级诊断结果驱动
         });
 
     connect(m_pyProc, &QProcess::readyReadStandardOutput, this, &FMFD::onPythonReadyRead);
@@ -1975,8 +1974,7 @@ void FMFD::updateModuleDiagnosisUI(const QMap<QString, double>& moduleDiag)
         moduleProbabilities[pair.first] = pair.second;
     }
     
-    // 更新结构图可视化
-    requestPythonVisualization(4);  // mode=4 触发symptom模式更新图形
+    // 更新结构图可视化由系统级诊断结果驱动
 
     m_diagText->append(tr("[BRB Diagnosis] Module diagnosis results visualized / 已将模块诊断结果可视化到BRB诊断区域"));
     
