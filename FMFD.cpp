@@ -1767,20 +1767,21 @@ void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
     m_diagText->append(tr("  系统状态 (System Status): %1 (%2)").arg(normalStatusCN, normalStatusEN));
 
     // 显示四类概率分布
-    QString topClass = sysDiag.predictedClass;
+    QString topClass = sysDiag.predictedClass.trimmed();
     double topProb = sysDiag.maxProb;
     if (!sysDiag.probabilities.isEmpty()) {
         m_diagText->append(tr("  概率分布 (Probability Distribution):"));
         topProb = -1.0;
         for (auto it = sysDiag.probabilities.constBegin(); it != sysDiag.probabilities.constEnd(); ++it) {
-            QString englishName = faultTypeMap.value(it.key(), it.key());
+            QString className = it.key().trimmed();
+            QString englishName = faultTypeMap.value(className, className);
             m_diagText->append(tr("    - %1 (%2): %3%")
-                .arg(it.key())
+                .arg(className)
                 .arg(englishName)
                 .arg(it.value() * 100, 0, 'f', 2));
             if (it.value() > topProb) {
                 topProb = it.value();
-                topClass = it.key();
+                topClass = className;
             }
         }
     }
@@ -1790,10 +1791,19 @@ void FMFD::updateSystemDiagnosisUI(const SystemDiagnosis& sysDiag)
         {QStringLiteral("正常"), 0},
         {QStringLiteral("频率失准"), 1},
         {QStringLiteral("幅度失准"), 2},
-        {QStringLiteral("参考电平失准"), 4}
+        {QStringLiteral("参考电平失准"), 4},
+        {QStringLiteral("Normal"), 0},
+        {QStringLiteral("Frequency Error"), 1},
+        {QStringLiteral("Amplitude Error"), 2},
+        {QStringLiteral("Reference Level Error"), 4}
     };
     if (classToVizMode.contains(topClass)) {
-        requestPythonVisualization(classToVizMode.value(topClass));
+        int vizMode = classToVizMode.value(topClass);
+        m_diagText->append(tr("[Log/日志] Auto viz: class=%1 mode=%2 prob=%3%")
+            .arg(topClass)
+            .arg(vizMode)
+            .arg(topProb * 100, 0, 'f', 2));
+        requestPythonVisualization(vizMode);
     }
 
     // 日志区打印关键信息（便于调试）
